@@ -1,7 +1,6 @@
 # ==============================================================================
 # CoCoTB Makefile — lscc_rom LIFCL testbench
 #
-# Replaces scripts/run.sh + scripts/run_qsim.sh.
 # The Radiant environment must be sourced before invoking make:
 #   source ~/setup_radiant.sh ng2026_2.82
 #
@@ -16,20 +15,22 @@
 
 # ── Simulator ─────────────────────────────────────────────────────────────────
 # cocotb drives vlog (compile) + vsim (simulate) — functionally identical to qrun.
-SIM           ?= questa
-TOPLEVEL_LANG  = verilog
-TOPLEVEL       = sim_top
-MODULE         = tb_lscc_rom    # → COCOTB_TEST_MODULES=tb_lscc_rom
+SIM              ?= questa
+TOPLEVEL_LANG    ?= verilog
+# name of toplevel module in the design
+COCOTB_TOPLEVEL  = testgen_top
+# basename of the Python test file(s)
+COCOTB_TEST_MODULES = tb_rom
 
-# ── RTL sources (replaces -f sim.f) ──────────────────────────────────────────
+# RTL sources
 VERILOG_SOURCES  = $(CURDIR)/rtl/lscc_rom.v
-VERILOG_SOURCES += $(CURDIR)/testbench/sim_top.v
+VERILOG_SOURCES += $(CURDIR)/testbench/testgen_top.v
 
-# ── Python testbench (replaces export PYTHONPATH="src:...") ──────────────────
+# Python testbench
 PYTHONPATH := $(CURDIR)/src$(if $(PYTHONPATH),:$(PYTHONPATH))
 export PYTHONPATH
 
-# ── DUT parameters (replaces env-var defaults in run.sh) ─────────────────────
+# DUT parameters
 RDATA_WIDTH   ?= 36
 RADDR_DEPTH   ?= 512
 REGMODE       ?= noreg
@@ -39,13 +40,13 @@ ECC_ENABLE    ?= 0
 INIT_MODE     ?= all_one
 export RDATA_WIDTH RADDR_DEPTH REGMODE RESETMODE OUTPUT_CLK_EN ECC_ENABLE INIT_MODE
 
-# Optional: run a single test case (replaces COCOTB_TEST_CASE env var).
+# Optional: run a single test case
 # Example: make TESTCASE=tc_01_01_sequential_read_noreg
 ifdef TESTCASE
 export COCOTB_TESTCASE := $(TESTCASE)
 endif
 
-# ── vsim arguments (replaces qrun flags) ─────────────────────────────────────
+# vsim arguments
 # Verilog parameter generics (-GRDATA_WIDTH=... etc.)
 SIM_ARGS += -GRDATA_WIDTH=$(RDATA_WIDTH)
 SIM_ARGS += -GRADDR_DEPTH=$(RADDR_DEPTH)
@@ -55,22 +56,22 @@ SIM_ARGS += -GOUTPUT_CLK_EN=$(OUTPUT_CLK_EN)
 SIM_ARGS += -GECC_ENABLE=$(ECC_ENABLE)
 SIM_ARGS += -GINIT_MODE=$(INIT_MODE)
 
-# LIFCL device simulation library (replaces qrun -L lifcl)
+# device simulation library
 SIM_ARGS += -L lifcl
 
-# Expose all ports/parameters for waveform capture (replaces -voptargs="+acc")
+# Expose all ports/parameters for waveform capture
 SIM_ARGS += -voptargs="+acc"
 
-# ── WLF output (replaces WLF_NAME in run.sh) ─────────────────────────────────
+# WLF output
 RESULTS_DIR := $(CURDIR)/results
 _WLF_TAG    := $(REGMODE)_$(RDATA_WIDTH)b_d$(RADDR_DEPTH)_$(RESETMODE)
 _WLF_TC     := $(if $(TESTCASE),_$(TESTCASE),_all)
 SIM_ARGS    += -wlf $(RESULTS_DIR)/$(_WLF_TAG)$(_WLF_TC).wlf
 
-# Log all signals to WLF (replaces -do "log -r /*" in run.sh)
+# Log all signals to WLF
 SIM_ARGS += -do "log -r /*"
 
-# ── libpython RPATH fix (replaces LD_LIBRARY_PATH export in run.sh) ──────────
+# libpython RPATH fix
 # RHEL8 ships libpython3.x.so.1.0 but not the unversioned .so symlink.
 # Setting LD_LIBRARY_PATH at make-time propagates to vsim's subprocess.
 _PYTHON_LIB_DIR := $(shell dirname $(shell cocotb-config --libpython))
@@ -79,10 +80,10 @@ export LD_LIBRARY_PATH
 export LIBPYTHON_LOC    := $(shell cocotb-config --libpython)
 export PYGPI_PYTHON_BIN := $(shell which python3)
 
-# ── vlog compile flags (replaces -sv in sim.f) ───────────────────────────────
+# vlog compile flags
 COMPILE_ARGS += -sv
 
-# ── Pull in cocotb's Questa Makefile rules ────────────────────────────────────
+# Pull in cocotb's Questa Makefile rules
 # This provides the 'sim', 'compile', and 'clean' targets automatically.
 include $(shell cocotb-config --makefiles)/Makefile.sim
 

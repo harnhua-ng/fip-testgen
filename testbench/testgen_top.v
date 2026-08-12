@@ -2,7 +2,7 @@
 // Simulation wrapper for lscc_rom CoCoTB testbench.
 // Provides GSR_INST at the top level (required by LIFCL EBR primitives)
 // and exposes all DUT ports for cocotb to drive.
-module sim_top #(
+module testgen_top #(
     parameter RDATA_WIDTH      = 36,
     parameter RADDR_DEPTH      = 512,
     parameter REGMODE          = "noreg",
