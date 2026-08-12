@@ -1,5 +1,5 @@
 """
-tb_lscc_rom.py  —  CoCoTB testbench for lscc_rom (LIFCL)
+tb_rom.py  —  CoCoTB testbench for lscc_rom (LIFCL)
 Spec ref  : ROM_FIP_Functional_Specification_v2.5.0.md
 Test plan : ROM_LIFCL_testplan.md
 

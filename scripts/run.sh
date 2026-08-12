@@ -16,7 +16,7 @@ run_qrun_cmd() {
     : "${ECC_ENABLE:=0}"
     : "${INIT_MODE:=all_one}"
 
-    export COCOTB_TEST_MODULES=tb_lscc_rom
+    export COCOTB_TEST_MODULES=tb_rom
     export PYTHONPATH="src${PYTHONPATH:+:${PYTHONPATH}}"
     export LIBPYTHON_LOC=$(cocotb-config --libpython)
     # Point cocotb to your python binary
@@ -43,12 +43,12 @@ run_qrun_cmd() {
          -pli "${COCOTB_VPI}" \
          -do "log -r /*; run -all; quit"
 
-    #COCOTB_TEST_MODULES=tb_lscc_rom_reset \
+    #COCOTB_TEST_MODULES=tb_rom_reset \
     #qrun -f ${FILE_LIST} \
         #-GRDATA_WIDTH=36 -GRADDR_DEPTH=512 -GREGMODE=noreg \
         #-GRESETMODE=sync -GOUTPUT_CLK_EN=0 -GECC_ENABLE=0 -GINIT_MODE=all_one \
-        #-pli "/lsc/scratch/sw_qor/QoR_User/hng/fip/lscc_rom/.venv/lib/python3.11/site-packages/cocotb/libs/libcocotbvpi_modelsim.so" \
-        #-wlf tb_lscc_rom_reset.wlf \
+        #-pli "/lsc/scratch/sw_qor/QoR_User/hng/fip-testgen/.venv/lib/python3.11/site-packages/cocotb/libs/libcocotbvpi_modelsim.so" \
+        #-wlf tb_rom_reset.wlf \
         #-do "log -r /*; run -all; quit"
 
 }
