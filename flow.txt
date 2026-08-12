@@ -1,0 +1,15 @@
+1. Initialize Radiant environment
+$ source ~/setup_radiant.sh ng2026_2.82
+
+2. Check out FIP from Perforce
+  - RTL
+  - testbench
+
+3. Get testplan
+
+4. Generate testbench, test cases, Questa .f simulation script for the FIP
+   - Validate testbench and test cases
+
+5. Run simulations
+
+6. Review results
