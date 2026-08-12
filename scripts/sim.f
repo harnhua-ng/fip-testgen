@@ -10,21 +10,11 @@
 
 # ── RTL sources ───────────────────────────────────────────────────────────────
 rtl/lscc_rom.v
-testbench/sim_top.v
+testbench/testgen_top.v
 
 # ── Top-level ─────────────────────────────────────────────────────────────────
--top sim_top
-
-# ── Default parameters (all overrideable via -G on the qrun command line) ────
--GRDATA_WIDTH=36
--GRADDR_DEPTH=512
--GREGMODE=noreg
--GRESETMODE=sync
--GOUTPUT_CLK_EN=0
--GECC_ENABLE=0
--GINIT_MODE=all_one
+-top testgen_top
 
 # ── Simulation run options ────────────────────────────────────────────────────
 -sv
 +acc
-#-L lifcl

@@ -59,17 +59,17 @@ SIM_ARGS += -GINIT_MODE=$(INIT_MODE)
 # device simulation library
 SIM_ARGS += -L lifcl
 
-# Expose all ports/parameters for waveform capture
-SIM_ARGS += -voptargs="+acc"
+# Expose all ports/parameters for waveform capture in the classic format
 
 # WLF output
 RESULTS_DIR := $(CURDIR)/results
 _WLF_TAG    := $(REGMODE)_$(RDATA_WIDTH)b_d$(RADDR_DEPTH)_$(RESETMODE)
 _WLF_TC     := $(if $(TESTCASE),_$(TESTCASE),_all)
+SIM_ARGS    += -voptargs="-access=rw+/. +acc" -suppress 12130
 SIM_ARGS    += -wlf $(RESULTS_DIR)/$(_WLF_TAG)$(_WLF_TC).wlf
 
-# Log all signals to WLF
-SIM_ARGS += -do "log -r /*"
+# run simulation
+SIM_ARGS    += -do "log -r /*; run -all; quit"
 
 # libpython RPATH fix
 # RHEL8 ships libpython3.x.so.1.0 but not the unversioned .so symlink.
@@ -79,6 +79,10 @@ LD_LIBRARY_PATH := $(_PYTHON_LIB_DIR)$(if $(LD_LIBRARY_PATH),:$(LD_LIBRARY_PATH)
 export LD_LIBRARY_PATH
 export LIBPYTHON_LOC    := $(shell cocotb-config --libpython)
 export PYGPI_PYTHON_BIN := $(shell which python3)
+
+# Lattice Questa license servers
+export LM_LICENSE_FILE     := 1850@ldc-virtlic02
+export SALT_LICENSE_SERVER := 1717@lrd-virtlic-rh8-01:1717@lrd-virtlic-ha-01a:1717@lrd-virtlic-ha-01b
 
 # vlog compile flags
 COMPILE_ARGS += -sv
