@@ -189,7 +189,8 @@ async def latency_check(dut, tc, n_addrs=16):
 # TG-01  Basic Read Functionality
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@cocotb.test(skip=(REGMODE != "noreg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
+@cocotb.test(skip=(REGMODE != "noreg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512
+                   or INIT_MODE != "mem_file"))
 async def tc_01_01_sequential_read_noreg(dut):
     """TC-01-01: rd_data_o = mem[addr] after exactly 1 clock cycle (noreg, 36b×512).
 
