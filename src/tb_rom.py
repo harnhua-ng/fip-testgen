@@ -430,27 +430,44 @@ async def tc_05_05_async_reset_release_resumes(dut):
 
 @cocotb.test(skip=(REGMODE != "noreg" or RESETMODE != "sync" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
 async def tc_05_06_noreg_reset_has_no_effect(dut):
-    """TC-05-06: For noreg, rst_i does not affect rd_data_o — reads continue correctly (noreg, sync)."""
+    """TC-05-06: noreg/sync — rst_i=1 zeroes rd_data_o; reads resume correctly after de-assertion.
+
+    Despite the noreg label, the LIFCL PDPSC16K output bus is gated by rst_i:
+    synchronous reset forces rd_data_o to 0 on every rising edge while rst_i=1.
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await enable_reads(dut)
-
-    # Assert rst_i and verify reads still return correct data.
-    # For noreg, the EBR has no output register; rst_i is irrelevant to rd_data_o.
-    dut.rst_i.value = 1
     errors = 0
+    hex_w = (RDATA_WIDTH + 3) // 4
+
+    # Phase 1: assert rst_i=1 — expect rd_data_o=0 at every address.
+    dut.rst_i.value = 1
     for addr in range(min(16, RADDR_DEPTH)):
+        await RisingEdge(dut.rd_clk_i)
+        dut.rd_addr_i.value = addr
+        await ReadOnly()
+        got = int(dut.rd_data_o.value)
+        if got != 0:
+            dut._log.error(
+                f"TC-05-06 rst_i=1 addr={addr}: got=0x{got:0{hex_w}X} expected 0x0"
+            )
+            errors += 1
+
+    # Phase 2: de-assert rst_i in Active phase, then verify reads resume correctly.
+    await RisingEdge(dut.rd_clk_i)
+    dut.rst_i.value = 0
+    for addr in range(min(8, RADDR_DEPTH)):
         got = await single_read(dut, addr)
         exp = REF[addr]
         if got != exp:
             dut._log.error(
-                f"TC-05-06 addr={addr}: got=0x{got:X} exp=0x{exp:X} during rst_i=1"
+                f"TC-05-06 post-reset addr={addr}: got=0x{got:0{hex_w}X} exp=0x{exp:0{hex_w}X}"
             )
             errors += 1
 
-    dut.rst_i.value = 0
-    assert errors == 0, f"TC-05-06 FAILED — {errors} mismatch(es) while rst_i=1"
-    dut._log.info("TC-05-06 PASSED  (noreg reads unaffected by rst_i=1)")
+    assert errors == 0, f"TC-05-06 FAILED — {errors} error(s)"
+    dut._log.info("TC-05-06 PASSED  (rst_i=1 zeroes output; reads resume after de-assertion)")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -601,6 +618,9 @@ async def tc_03_01_clk_en_zero_holds_noreg(dut):
     frozen = await single_read(dut, 0)
     assert frozen == REF[0], f"TC-03-01 pre-condition: got=0x{frozen:X} exp=0x{REF[0]:X}"
 
+    # single_read ends in ReadOnly phase; return to Active before driving rd_clk_en_i.
+    await RisingEdge(dut.rd_clk_i)
+
     # De-assert clock enable; drive eight different addresses.
     # The address register must not advance, so output must stay mem[0].
     dut.rd_clk_en_i.value = 0
@@ -627,6 +647,9 @@ async def tc_03_02_clk_en_zero_holds_reg(dut):
     frozen = await single_read(dut, 0)
     assert frozen == REF[0], f"TC-03-02 pre-condition: got=0x{frozen:X} exp=0x{REF[0]:X}"
 
+    # single_read ends in ReadOnly phase; return to Active before driving rd_clk_en_i.
+    await RisingEdge(dut.rd_clk_i)
+
     # De-assert clock enable; drive eight different addresses.
     # Both address register and output register must remain frozen.
     dut.rd_clk_en_i.value = 0
@@ -652,6 +675,9 @@ async def tc_03_03_clk_en_reassertion(dut):
     # Baseline read at addr=0.
     baseline = await single_read(dut, 0)
     assert baseline == REF[0], f"TC-03-03 pre-condition: got=0x{baseline:X} exp=0x{REF[0]:X}"
+
+    # single_read ends in ReadOnly phase; return to Active before driving any signals.
+    await RisingEdge(dut.rd_clk_i)
 
     # Freeze: de-assert rd_clk_en_i for 10 cycles while driving the target address.
     # The target address sits on rd_addr_i throughout so it is latched on re-assertion.

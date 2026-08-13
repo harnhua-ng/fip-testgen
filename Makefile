@@ -39,7 +39,8 @@ OUTPUT_CLK_EN ?= 0
 ECC_ENABLE    ?= 0
 INIT_MODE     ?= all_one
 INIT_FILE     ?= $(CURDIR)/testbench/rom_init.hex
-export RDATA_WIDTH RADDR_DEPTH REGMODE RESETMODE OUTPUT_CLK_EN ECC_ENABLE INIT_MODE INIT_FILE
+DEVICE_FAMILY ?= lifcl
+export RDATA_WIDTH RADDR_DEPTH REGMODE RESETMODE OUTPUT_CLK_EN ECC_ENABLE INIT_MODE INIT_FILE DEVICE_FAMILY
 
 # Optional: run a single test case
 # Example: make TESTCASE=tc_01_01_sequential_read_noreg
@@ -58,8 +59,8 @@ SIM_ARGS += -GECC_ENABLE=$(ECC_ENABLE)
 SIM_ARGS += -GINIT_MODE=$(INIT_MODE)
 SIM_ARGS += -GINIT_FILE=$(INIT_FILE)
 
-# device simulation library
-SIM_ARGS += -L lifcl
+# device simulation library (override with DEVICE_FAMILY=lfd2nx, lfcpnx, lfmxo5, etc.)
+SIM_ARGS += -L $(DEVICE_FAMILY)
 
 # Expose all ports/parameters for waveform capture in the classic format
 
@@ -115,16 +116,19 @@ clean::
 # Add entries here as TG-06 through TG-09 are implemented and need new combos.
 # ==============================================================================
 ALL_CONFIGS := \
-    noreg_36_512_sync   \
-    reg_36_512_sync     \
-    reg_36_512_async    \
-    reg_18_1024_sync    \
-    noreg_9_2048_sync   \
-    noreg_18_1024_sync  \
-    reg_36_1024_sync
+    noreg_36_512_sync         \
+    reg_36_512_sync           \
+    reg_36_512_async          \
+    reg_18_1024_sync          \
+    noreg_9_2048_sync         \
+    noreg_18_1024_sync        \
+    reg_36_1024_sync          \
+    noreg_36_512_sync_memfile
 
-# For each config name, extract the four fields by splitting on underscore.
-# noreg_36_512_sync → word1=noreg  word2=36  word3=512  word4=sync
+# For each config name, extract fields by splitting on underscore.
+# 4-word form:  noreg_36_512_sync        → REGMODE=noreg RDATA_WIDTH=36 RADDR_DEPTH=512 RESETMODE=sync
+# 5-word form:  noreg_36_512_sync_memfile → …same… INIT_MODE=mem_file
+# The token "memfile" maps to INIT_MODE=mem_file (no underscore in the token name).
 define RUN_CONFIG
 .PHONY: $(1)
 $(1):
@@ -137,6 +141,7 @@ $(1):
 		RDATA_WIDTH=$(word 2,$(subst _, ,$(1))) \
 		RADDR_DEPTH=$(word 3,$(subst _, ,$(1))) \
 		RESETMODE=$(word 4,$(subst _, ,$(1))) \
+		$(if $(word 5,$(subst _, ,$(1))),INIT_MODE=$(patsubst memfile,mem_file,$(word 5,$(subst _, ,$(1)))),) \
 		SIM_BUILD=$(CURDIR)/sim_build/$(1)
 endef
 
