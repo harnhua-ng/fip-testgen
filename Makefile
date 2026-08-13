@@ -1,3 +1,5 @@
+SHELL := /bin/bash
+
 # ==============================================================================
 # CoCoTB Makefile — lscc_rom LIFCL testbench
 #
@@ -131,7 +133,7 @@ ALL_CONFIGS := \
 # The token "memfile" maps to INIT_MODE=mem_file (no underscore in the token name).
 define RUN_CONFIG
 .PHONY: $(1)
-$(1):
+$(1): | $(RESULTS_DIR)
 	@echo ""
 	@echo "================================================================"
 	@echo " Config: $(1)"
@@ -142,7 +144,8 @@ $(1):
 		RADDR_DEPTH=$(word 3,$(subst _, ,$(1))) \
 		RESETMODE=$(word 4,$(subst _, ,$(1))) \
 		$(if $(word 5,$(subst _, ,$(1))),INIT_MODE=$(patsubst memfile,mem_file,$(word 5,$(subst _, ,$(1)))),) \
-		SIM_BUILD=$(CURDIR)/sim_build/$(1)
+		SIM_BUILD=$(CURDIR)/sim_build/$(1) \
+		2>&1 | tee $(CURDIR)/results/$(1).log; exit $${PIPESTATUS[0]}
 endef
 
 $(foreach cfg,$(ALL_CONFIGS),$(eval $(call RUN_CONFIG,$(cfg))))
@@ -152,5 +155,14 @@ all_configs: $(ALL_CONFIGS)
 	@echo ""
 	@echo "================================================================"
 	@echo " All $(words $(ALL_CONFIGS)) configurations completed"
-	@echo " WLF files are in: $(RESULTS_DIR)/"
+	@echo " Logs:     $(RESULTS_DIR)/*.log"
+	@echo " WLF files: $(RESULTS_DIR)/*.wlf"
 	@echo "================================================================"
+
+# ── summary ───────────────────────────────────────────────────────────────────
+# Parse all results/*.log files and write a Markdown summary table.
+#   make summary            — prints to terminal
+#   make summary MD=1       — also writes results/summary.md
+.PHONY: summary
+summary:
+	@python3 scripts/summarize.py $(if $(MD),$(RESULTS_DIR)/summary.md)
