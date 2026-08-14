@@ -1,5 +1,12 @@
 # fip-testgen
 
+## Background
+
+The contents of this repository represent an experiment to use GenAI (e.g. Claude Code) to generate Verilog testcases from an available test plan in .md format.  
+The opensource Python-based [Cocotb](https://www.cocotb.org/) is used in conjunction with GenAI to help specify testcases and automate the simulation flow.
+
+> Cocotb helps test chip designs using Python instead of specialized hardware languages. It connects Python code directly to a digital circuit simulator, allowing you to manipulate input signals and verify the outputs using standard software libraries.
+
 ## Quick Start
 
 ```bash
