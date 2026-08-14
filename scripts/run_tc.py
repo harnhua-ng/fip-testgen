@@ -14,6 +14,7 @@ Or via make:
 """
 
 import os
+import re
 import sys
 import subprocess
 from dataclasses import dataclass
@@ -288,6 +289,77 @@ def run_drc():
     return subprocess.run(cmd).returncode
 
 
+# ─── log parsing and group summary ──────────────────────────────────────────
+
+# Matches CoCoTB result rows: ** <testname>  PASS|FAIL|SKIP  sim_ns  real_s  ratio **
+_RESULT_RE = re.compile(
+    r'\*\*\s+(\S+)\s+(PASS|FAIL|SKIP)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*\*\*'
+)
+
+
+def _parse_log(log_file):
+    """Return (status, sim_ns, real_s, ratio) from the CoCoTB table in a log, or None."""
+    try:
+        with open(log_file) as f:
+            for line in f:
+                m = _RESULT_RE.search(line)
+                if m and m.group(1) != "TEST":
+                    return m.group(2), float(m.group(3)), float(m.group(4)), float(m.group(5))
+    except OSError:
+        pass
+    return None
+
+
+def _print_group_summary(tg_id, tc_ids, failures):
+    results_dir = os.path.join(REPO_ROOT, "results")
+    W = 74
+
+    rows = []
+    for tc_id in tc_ids:
+        log    = os.path.join(results_dir, "tc-" + tc_id + ".log")
+        parsed = _parse_log(log)
+        if parsed:
+            status, sim_ns, real_s, ratio = parsed
+        else:
+            status = "FAIL" if tc_id in failures else "SKIP"
+            sim_ns = real_s = ratio = None
+        rows.append((tc_id, status, sim_ns, real_s, ratio))
+
+    print("")
+    print("=" * W)
+    print("  TG-{} — Results".format(tg_id))
+    print("=" * W)
+    print("  {:<10}  {:>6}  {:>13}  {:>13}  {:>12}".format(
+        "TC", "STATUS", "SIM TIME (ns)", "REAL TIME (s)", "RATIO (ns/s)"))
+    print("  " + "-" * (W - 2))
+
+    pass_c = fail_c = skip_c = 0
+    total_ns = total_real = 0.0
+    for tc_id, status, sim_ns, real_s, ratio in rows:
+        if   status == "PASS": pass_c += 1
+        elif status == "FAIL": fail_c += 1
+        else:                  skip_c += 1
+        if sim_ns is not None:
+            total_ns   += sim_ns
+            total_real += real_s
+        ns_s    = "{:>13.2f}".format(sim_ns) if sim_ns is not None else "{:>13}".format("--")
+        real_s2 = "{:>13.2f}".format(real_s) if real_s is not None else "{:>13}".format("--")
+        rat_s   = "{:>12.2f}".format(ratio)  if ratio  is not None else "{:>12}".format("--")
+        print("  {:<10}  {:>6}  {}  {}  {}".format("TC-" + tc_id, status, ns_s, real_s2, rat_s))
+
+    n = len(rows)
+    print("  " + "-" * (W - 2))
+    print("  TESTS={}  PASS={}  FAIL={}  SKIP={}  {:>13.2f}  {:>13.2f}".format(
+        n, pass_c, fail_c, skip_c, total_ns, total_real))
+    print("=" * W)
+    if failures:
+        print("  TG-{}: {} FAILED — {}".format(
+            tg_id, len(failures), ", ".join("TC-" + f for f in failures)))
+    else:
+        print("  TG-{}: all {} passed".format(tg_id, n))
+    print("=" * W)
+
+
 # ─── parsing ─────────────────────────────────────────────────────────────────
 
 def _strip_prefix(s, prefix):
@@ -347,14 +419,9 @@ def main():
             if rc != 0:
                 failures.append(tc_id)
 
-        print("")
-        print("=" * 66)
+        _print_group_summary(ident, tc_ids, set(failures))
         if failures:
-            print("  TG-" + ident + ": " + str(len(failures)) + " FAILED — " +
-                  ", ".join("TC-" + f for f in failures))
             sys.exit(1)
-        else:
-            print("  TG-" + ident + ": all " + str(len(tc_ids)) + " test cases passed")
 
 
 if __name__ == "__main__":
