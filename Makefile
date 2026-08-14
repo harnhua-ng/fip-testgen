@@ -103,9 +103,13 @@ sim: results_dir
 results_dir:
 	@mkdir -p $(RESULTS_DIR)
 
-# Override clean to also remove results/
+# Override clean to also remove results/ and QuestaSim runtime artifacts
 clean::
 	rm -rf $(RESULTS_DIR)
+	rm -rf qrun.out
+	rm -rf sim_build
+	rm -f  transcript modelsim.ini
+	find $(CURDIR)/src $(CURDIR)/scripts -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
 # ==============================================================================
 # all_configs — run every required parameter combination in sequence
