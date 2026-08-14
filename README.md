@@ -1,5 +1,12 @@
 # fip-testgen
 
+## Background
+
+The contents of this repository represent an experiment to use GenAI (e.g. Claude Code) to generate Verilog testcases from an available test plan in .md format.  
+The opensource Python-based [Cocotb](https://www.cocotb.org/) is used in conjunction with GenAI to help specify testcases and automate the simulation flow.
+
+> Cocotb helps test chip designs using Python instead of specialized hardware languages. It connects Python code directly to a digital circuit simulator, allowing you to manipulate input signals and verify the outputs using standard software libraries.
+
 ## Quick Start
 
 ```bash
@@ -18,6 +25,37 @@ summary at the end.
 The dispatch is handled by `scripts/run_tc.py`, which sets all simulator
 parameters (`REGMODE`, `RDATA_WIDTH`, `RADDR_DEPTH`, etc.) for each TC
 automatically — no need to look up Makefile config names.
+
+---
+
+## Example of Results Summary for `make tg-01`
+
+## TG-01 — Artifacts
+
+| TC | LOG | WAVEFORM |
+|---|---|---|
+| TC-01-01 | results/tc-01-01.log | results/tc-01-01.wlf |
+| TC-01-02 | results/tc-01-02.log | results/tc-01-02.wlf |
+| TC-01-03 | results/tc-01-03.log | results/tc-01-03.wlf |
+| TC-01-04 | results/tc-01-04.log | results/tc-01-04.wlf |
+| TC-01-05 | results/tc-01-05.log | results/tc-01-05.wlf |
+| TC-01-06 | results/tc-01-06.log | results/tc-01-06.wlf |
+| TC-01-07 | results/tc-01-07.log | results/tc-01-07.wlf |
+
+## TG-01 — Results
+
+| TC | STATUS | SIM TIME (ns) | REAL TIME (s) |
+|---|---|---:|---:|
+| TC-01-01 | FAIL | 270.00 | 0.02 |
+| TC-01-02 | PASS | 280.00 | 0.01 |
+| TC-01-03 | PASS | 10340.00 | 0.14 |
+| TC-01-04 | PASS | 15460.00 | 0.18 |
+| TC-01-05 | PASS | 160.00 | 0.01 |
+| TC-01-06 | PASS | 3100.00 | 0.06 |
+| TC-01-07 | PASS | 500.00 | 0.02 |
+
+> TOTAL=7  PASS=6  FAIL=1  SKIP=0  
+> TG-01: 1 FAILED - TC-01-01
 
 ---
 
@@ -182,13 +220,18 @@ make tg-10    # or: make drc
 
 ---
 
-## Legacy: running by configuration name
+## How to run with various Makefile targets
 
-The `make all_configs` target still exists and runs every configuration in
-bulk. It is useful for a full regression but gives no control over which
+`make sim` is the basic command that runs a single simulation with whatever parameters are currently set (or defaulted). All other targets are wrappers around it:
+
+- `make tc-XX-YY` calls `make sim` once with the exact parameters and `TESTCASE` for that one test case.
+- `make tg-XX` calls `make sim` repeatedly, once per test case in the group.
+- `make all_configs` calls `make sim` once per named configuration, running all test cases within each.
+- `make drc` / `make tg-10` bypasses `make sim` entirely and runs pytest instead.
+
+`make all_configs` runs every configuration in bulk. It is useful for a full regression but gives no control over which
 test cases execute within each configuration.
 
-For targeted runs, prefer `make tc-XX-YY` / `make tg-XX` instead.
-
+For targeted runs, use `make tc-XX-YY` / `make tg-XX` instead.  
 The mapping between TC IDs and the underlying simulator parameters is
 maintained in `scripts/run_tc.py`.
