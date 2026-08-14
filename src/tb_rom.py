@@ -87,6 +87,13 @@ async def do_reset(dut):
 
     Mirrors the golden testbench: rst_i=1 for RESET_CNT, then de-assert and
     wait for one rising edge before handing control back to the test.
+
+    Verilog equivalent
+    ------------------
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;                    // RST_NS = 100 ns (10 cycles at 100 MHz)
+    rst_i = 0;
+    @(posedge rd_clk_i);    // sync to first post-reset rising edge
     """
     dut.rst_i.value           = 1
     dut.rd_en_i.value         = 0
@@ -130,7 +137,12 @@ async def single_read_ecc(dut, addr):
 
 
 async def enable_reads(dut):
-    """Assert all three read enable signals."""
+    """Assert all three read enable signals.
+
+    Verilog equivalent
+    ------------------
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    """
     dut.rd_en_i.value         = 1
     dut.rd_clk_en_i.value     = 1
     dut.rd_out_clk_en_i.value = 1
@@ -199,6 +211,31 @@ async def latency_check(dut, tc, n_addrs=16):
       Prime      — fill the first LAT pipeline stages (no output sampled).
       Steady     — drive addr[i], sample addr[i-LAT] in the same clock cycle.
       Drain      — stop driving; flush the last LAT addresses through the pipeline.
+
+    Verilog equivalent  (LAT and n_addrs are parameters; tc is the TC-ID string)
+    -----------------------------------------------------------------------------
+    // Prime: fill LAT pipeline stages, no output sampled
+    for (int i = 0; i < LAT; i++) begin
+        @(posedge rd_clk_i); rd_addr_i = i;
+    end
+
+    // Steady: at each rising edge drive addr[i] and sample addr[i-LAT]
+    for (int i = LAT; i < n_addrs; i++) begin
+        @(posedge rd_clk_i); rd_addr_i = i;
+        // → Python: dut._log.error(f"[{tc}] cycle {i}: addr_in_pipeline={i-LAT} got=0x... exp=0x...")
+        assert (rd_data_o === REF[i-LAT])
+          else $error("[%s] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
+                      tc, i, i-LAT, rd_data_o, REF[i-LAT]);
+    end
+
+    // Drain: stop driving; flush the last LAT addresses through the pipeline
+    for (int j = n_addrs-LAT; j < n_addrs; j++) begin
+        @(posedge rd_clk_i);
+        // → Python: dut._log.error(f"[{tc}] drain: addr_in_pipeline={j} got=0x... exp=0x...")
+        assert (rd_data_o === REF[j])
+          else $error("[%s] drain: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
+                      tc, j, rd_data_o, REF[j]);
+    end
     """
     errors = 0
     hex_w  = (RDATA_WIDTH + 3) // 4
@@ -242,11 +279,46 @@ async def latency_check(dut, tc, n_addrs=16):
 @cocotb.test(skip=(REGMODE != "noreg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512
                    or INIT_MODE != "mem_file"))
 async def tc_01_01_sequential_read_noreg(dut):
-    """TC-01-01: rd_data_o = mem[addr] after exactly 1 clock cycle (noreg, 36b×512).
+    """TC-01-01: rd_data_o = mem[addr] after exactly 1 clock cycle (noreg, 36bx512).
 
     Drives 16 sequential addresses in a pipelined pattern.  At each cycle the
     address presented one cycle earlier must appear at rd_data_o, proving that
     the pipeline latency is exactly LAT=1.
+
+    Verilog equivalent  (noreg → LAT=1, CLK_NS=10 ns, RST_NS=100 ns)
+    ------------------------------------------------------------------
+    // clock: rd_clk_i, period = 10 ns (100 MHz)
+
+    // → cocotb: await do_reset(dut)
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;                                // 10 cycles at 100 MHz
+    rst_i = 0;
+    @(posedge rd_clk_i);                 // sync to first post-reset rising edge
+
+    // → cocotb: await enable_reads(dut)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+
+    // → cocotb: await latency_check(dut, "TC-01-01")
+    //   Prime: fill the 1-cycle pipeline (no output sampled yet)
+    @(posedge rd_clk_i); rd_addr_i = 0;
+
+    //   Steady: drive addr[i], simultaneously sample addr[i-1] from the pipeline
+    for (int i = 1; i < 16; i++) begin
+        @(posedge rd_clk_i); rd_addr_i = i;
+        // → Python: latency_check() steady loop
+        //       dut._log.error(f"[TC-01-01] cycle {i}: addr_in_pipeline={i-1} got=0x... exp=0x...")
+        assert (rd_data_o === REF[i-1])
+          else $error("[TC-01-01] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
+                      i, i-1, rd_data_o, REF[i-1]);
+    end
+
+    //   Drain: stop driving new addresses; flush addr=15 through the 1-cycle pipeline
+    @(posedge rd_clk_i);
+    // → Python: latency_check() drain loop
+    //       dut._log.error(f"[TC-01-01] drain: addr_in_pipeline=15 got=0x... exp=0x...")
+    assert (rd_data_o === REF[15])
+      else $error("[TC-01-01] drain: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
+                  15, rd_data_o, REF[15]);
     """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
@@ -261,6 +333,37 @@ async def tc_01_02_sequential_read_reg(dut):
     Drives 16 sequential addresses in a pipelined pattern.  At each cycle the
     address presented two cycles earlier must appear at rd_data_o, proving that
     the pipeline latency is exactly LAT=2.
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // latency_check (n=16, LAT=2)
+    // Prime: fill 2 pipeline stages
+    @(posedge rd_clk_i); rd_addr_i = 0;
+    @(posedge rd_clk_i); rd_addr_i = 1;
+    // Steady: drive addr[i], simultaneously sample addr[i-2]
+    for (int i = 2; i < 16; i++) begin
+        @(posedge rd_clk_i); rd_addr_i = i;
+        assert (rd_data_o === REF[i-2])
+          else $error("[TC-01-02] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
+                      i, i-2, rd_data_o, REF[i-2]);
+    end
+    // Drain: flush last 2 addresses
+    @(posedge rd_clk_i);
+    assert (rd_data_o === REF[14])
+      else $error("[TC-01-02] drain: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
+                  14, rd_data_o, REF[14]);
+    @(posedge rd_clk_i);
+    assert (rd_data_o === REF[15])
+      else $error("[TC-01-02] drain: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
+                  15, rd_data_o, REF[15]);
     """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
@@ -270,7 +373,26 @@ async def tc_01_02_sequential_read_reg(dut):
 
 @cocotb.test(skip=(REGMODE != "noreg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
 async def tc_01_03_full_sweep_noreg(dut):
-    """TC-01-03: All RADDR_DEPTH locations verified in order (noreg, 36b×512)."""
+    """TC-01-03: All RADDR_DEPTH locations verified in order (noreg, 36b×512).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT=1)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(1) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-01-03] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep(dut, "TC-01-03")
@@ -278,7 +400,26 @@ async def tc_01_03_full_sweep_noreg(dut):
 
 @cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
 async def tc_01_04_full_sweep_reg(dut):
-    """TC-01-04: All RADDR_DEPTH locations verified in order (reg, 36b×512)."""
+    """TC-01-04: All RADDR_DEPTH locations verified in order (reg, 36b×512).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT=2)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(2) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-01-04] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep(dut, "TC-01-04")
@@ -286,7 +427,31 @@ async def tc_01_04_full_sweep_reg(dut):
 
 @cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 18 or RADDR_DEPTH != 1024))
 async def tc_01_05_boundary_addresses(dut):
-    """TC-01-05: Verify addr=0 and addr=RADDR_DEPTH-1 return correct data (reg, 18b×1024)."""
+    """TC-01-05: Verify addr=0 and addr=RADDR_DEPTH-1 return correct data (reg, 18b×1024).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // single_read(0)
+    @(posedge rd_clk_i); rd_addr_i = 0;
+    repeat(LAT) @(posedge rd_clk_i);
+    assert (rd_data_o === REF[0])
+      else $fatal(1, "TC-01-05 FAILED at boundary addr=0: got=0x%0X exp=0x%0X",
+                  rd_data_o, REF[0]);
+    // single_read(RADDR_DEPTH-1)
+    @(posedge rd_clk_i); rd_addr_i = RADDR_DEPTH - 1;
+    repeat(LAT) @(posedge rd_clk_i);
+    assert (rd_data_o === REF[RADDR_DEPTH-1])
+      else $fatal(1, "TC-01-05 FAILED at boundary addr=%0d: got=0x%0X exp=0x%0X",
+                  RADDR_DEPTH-1, rd_data_o, REF[RADDR_DEPTH-1]);
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await enable_reads(dut)
@@ -303,7 +468,29 @@ async def tc_01_05_boundary_addresses(dut):
 
 @cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
 async def tc_01_06_random_addresses(dut):
-    """TC-01-06: 100 random address reads match reference model (reg, 36b×512)."""
+    """TC-01-06: 100 random address reads match reference model (reg, 36b×512).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // 100 random reads (addresses pre-computed from Python seed 0x1ECC_CAFE)
+    // single_read(rand_addr) for each iteration
+    for (int iter = 0; iter < 100; iter++) begin
+        automatic int addr = rand_addr[iter];
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("TC-01-06 addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await enable_reads(dut)
@@ -324,7 +511,27 @@ async def tc_01_06_random_addresses(dut):
 
 @cocotb.test(skip=(REGMODE != "noreg" or RDATA_WIDTH != 9 or RADDR_DEPTH != 2048))
 async def tc_01_07_repeated_address(dut):
-    """TC-01-07: Same address read 20 consecutive cycles yields stable output (noreg, 9b×2048)."""
+    """TC-01-07: Same address read 20 consecutive cycles yields stable output (noreg, 9b×2048).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // single_read(RADDR_DEPTH/2) repeated 20 times (LAT=1)
+    for (int rep = 0; rep < 20; rep++) begin
+        @(posedge rd_clk_i); rd_addr_i = RADDR_DEPTH / 2;
+        repeat(1) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[RADDR_DEPTH/2])
+          else $fatal(1, "TC-01-07 FAILED at rep=%0d: got=0x%0X exp=0x%0X",
+                      rep, rd_data_o, REF[RADDR_DEPTH/2]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await enable_reads(dut)
@@ -344,7 +551,25 @@ async def tc_01_07_repeated_address(dut):
 
 @cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
 async def tc_02_01_rd_en_zero_at_start(dut):
-    """TC-02-01: rd_en_i=0 from start — rd_data_o holds reset value of 0 (reg, 36b×512)."""
+    """TC-02-01: rd_en_i=0 from start — rd_data_o holds reset value of 0 (reg, 36b×512).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // rd_clk_en_i=1, rd_out_clk_en_i=1, rd_en_i deliberately 0
+    rd_clk_en_i = 1; rd_out_clk_en_i = 1; rd_en_i = 0;
+    for (int addr = 0; addr < 8; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        assert (rd_data_o === 0)
+          else $fatal(1, "TC-02-01 FAILED at addr=%0d: rd_data_o=0x%0X, expected 0 (rd_en_i=0)",
+                      addr, rd_data_o);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
 
@@ -369,7 +594,33 @@ async def tc_02_01_rd_en_zero_at_start(dut):
 
 @cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
 async def tc_02_02_rd_en_deasserted_mid_seq(dut):
-    """TC-02-02: rd_en_i de-asserted mid-sequence — output freezes at last valid value (reg, 36b×512)."""
+    """TC-02-02: rd_en_i de-asserted mid-sequence — output freezes at last valid value (reg, 36b×512).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // Fill pipeline at addr=0 (LAT+1 edges); frozen = REF[0]
+    rd_addr_i = 0;
+    repeat(LAT + 1) @(posedge rd_clk_i);
+    assert (rd_data_o === REF[0])
+      else $fatal(1, "TC-02-02 pre-condition: addr=0 got=0x%0X exp=0x%0X",
+                  rd_data_o, REF[0]);
+    // De-assert rd_en_i; drive 8 different addresses — output must hold at REF[0]
+    rd_en_i = 0;
+    for (int addr = 1; addr <= 8; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        assert (rd_data_o === REF[0])
+          else $fatal(1, "TC-02-02 FAILED at addr=%0d: rd_data_o=0x%0X, expected frozen=0x%0X",
+                      addr, rd_data_o, REF[0]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await enable_reads(dut)
@@ -400,7 +651,36 @@ async def tc_02_02_rd_en_deasserted_mid_seq(dut):
 
 @cocotb.test(skip=(REGMODE != "noreg" or RDATA_WIDTH != 18 or RADDR_DEPTH != 1024))
 async def tc_02_03_rd_en_toggle_every_cycle(dut):
-    """TC-02-03: rd_en_i alternated 1/0 — output updates only when rd_en_i=1 (noreg, 18b×1024)."""
+    """TC-02-03: rd_en_i alternated 1/0 — output updates only when rd_en_i=1 (noreg, 18b×1024).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // rd_clk_en_i=1, rd_out_clk_en_i=1; rd_en_i toggled per iteration (noreg, LAT=1)
+    rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int i = 0; i < 8; i++) begin
+        automatic int addr = i * (RADDR_DEPTH / 8);
+        // rd_en_i=1: single_read(addr), LAT=1
+        rd_en_i = 1;
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(1) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("TC-02-03 rd_en=1 iter=%0d addr=%0d: got=0x%0X exp=0x%0X",
+                      i, addr, rd_data_o, REF[addr]);
+        // rd_en_i=0: one cycle with different address — output must hold at REF[addr]
+        rd_en_i = 0;
+        rd_addr_i = (addr + RADDR_DEPTH / 2) % RADDR_DEPTH;
+        @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("TC-02-03 rd_en=0 iter=%0d: got=0x%0X expected hold=0x%0X",
+                      i, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     dut.rd_clk_en_i.value     = 1
@@ -444,7 +724,35 @@ async def tc_02_03_rd_en_toggle_every_cycle(dut):
 
 @cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
 async def tc_02_04_rd_en_resumes(dut):
-    """TC-02-04: rd_en_i de-asserted then re-asserted — correct data resumes (reg, 36b×512)."""
+    """TC-02-04: rd_en_i de-asserted then re-asserted — correct data resumes (reg, 36b×512).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // single_read(0) — baseline (LAT=2)
+    @(posedge rd_clk_i); rd_addr_i = 0;
+    repeat(2) @(posedge rd_clk_i);
+    assert (rd_data_o === REF[0])
+      else $fatal(1, "TC-02-04 pre-condition: addr=0 got=0x%0X exp=0x%0X",
+                  rd_data_o, REF[0]);
+    // De-assert rd_en_i for 5 cycles
+    rd_en_i = 0;
+    repeat(5) @(posedge rd_clk_i);
+    // Re-assert rd_en_i; single_read(RADDR_DEPTH/2) (LAT=2)
+    rd_en_i = 1;
+    @(posedge rd_clk_i); rd_addr_i = RADDR_DEPTH / 2;
+    repeat(2) @(posedge rd_clk_i);
+    assert (rd_data_o === REF[RADDR_DEPTH/2])
+      else $fatal(1, "TC-02-04 FAILED after re-assertion: addr=%0d got=0x%0X exp=0x%0X",
+                  RADDR_DEPTH/2, rd_data_o, REF[RADDR_DEPTH/2]);
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await enable_reads(dut)
@@ -477,7 +785,34 @@ async def tc_02_04_rd_en_resumes(dut):
 
 @cocotb.test(skip=(REGMODE != "noreg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
 async def tc_03_01_clk_en_zero_holds_noreg(dut):
-    """TC-03-01: rd_clk_en_i=0 freezes address register — rd_data_o retains last value (noreg, 36b×512)."""
+    """TC-03-01: rd_clk_en_i=0 freezes address register — rd_data_o retains last value (noreg, 36b×512).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // single_read(0) — prime (LAT=1)
+    @(posedge rd_clk_i); rd_addr_i = 0;
+    repeat(1) @(posedge rd_clk_i);
+    assert (rd_data_o === REF[0])
+      else $fatal(1, "TC-03-01 pre-condition: got=0x%0X exp=0x%0X",
+                  rd_data_o, REF[0]);
+    // Return to Active; de-assert rd_clk_en_i
+    @(posedge rd_clk_i);
+    rd_clk_en_i = 0;
+    for (int addr = 1; addr <= 8; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        assert (rd_data_o === REF[0])
+          else $fatal(1, "TC-03-01 FAILED addr=%0d: rd_data_o=0x%0X expected frozen=0x%0X",
+                      addr, rd_data_o, REF[0]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await enable_reads(dut)
@@ -506,7 +841,34 @@ async def tc_03_01_clk_en_zero_holds_noreg(dut):
 
 @cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
 async def tc_03_02_clk_en_zero_holds_reg(dut):
-    """TC-03-02: rd_clk_en_i=0 freezes address and output registers — rd_data_o retains last value (reg, 36b×512)."""
+    """TC-03-02: rd_clk_en_i=0 freezes address and output registers — rd_data_o retains last value (reg, 36b×512).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // single_read(0) — prime (LAT=2)
+    @(posedge rd_clk_i); rd_addr_i = 0;
+    repeat(2) @(posedge rd_clk_i);
+    assert (rd_data_o === REF[0])
+      else $fatal(1, "TC-03-02 pre-condition: got=0x%0X exp=0x%0X",
+                  rd_data_o, REF[0]);
+    // Return to Active; de-assert rd_clk_en_i
+    @(posedge rd_clk_i);
+    rd_clk_en_i = 0;
+    for (int addr = 1; addr <= 8; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        assert (rd_data_o === REF[0])
+          else $fatal(1, "TC-03-02 FAILED addr=%0d: rd_data_o=0x%0X expected frozen=0x%0X",
+                      addr, rd_data_o, REF[0]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await enable_reads(dut)
@@ -535,7 +897,36 @@ async def tc_03_02_clk_en_zero_holds_reg(dut):
 
 @cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
 async def tc_03_03_clk_en_reassertion(dut):
-    """TC-03-03: rd_clk_en_i frozen 10 cycles then re-asserted — new address registered, correct data (reg, 36b×512)."""
+    """TC-03-03: rd_clk_en_i frozen 10 cycles then re-asserted — new address registered, correct data (reg, 36b×512).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // single_read(0) — baseline (LAT=2)
+    @(posedge rd_clk_i); rd_addr_i = 0;
+    repeat(2) @(posedge rd_clk_i);
+    assert (rd_data_o === REF[0])
+      else $fatal(1, "TC-03-03 pre-condition: got=0x%0X exp=0x%0X",
+                  rd_data_o, REF[0]);
+    // Return to Active; freeze rd_clk_en_i for 10 cycles while holding target address
+    @(posedge rd_clk_i);
+    rd_clk_en_i = 0; rd_addr_i = RADDR_DEPTH / 4;
+    repeat(10) @(posedge rd_clk_i);
+    // Re-assert rd_clk_en_i; single_read(RADDR_DEPTH/4) flushes LAT=2 pipeline
+    rd_clk_en_i = 1;
+    @(posedge rd_clk_i); rd_addr_i = RADDR_DEPTH / 4;
+    repeat(2) @(posedge rd_clk_i);
+    assert (rd_data_o === REF[RADDR_DEPTH/4])
+      else $fatal(1, "TC-03-03 FAILED after re-assertion: addr=%0d got=0x%0X exp=0x%0X",
+                  RADDR_DEPTH/4, rd_data_o, REF[RADDR_DEPTH/4]);
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await enable_reads(dut)
@@ -568,7 +959,34 @@ async def tc_03_03_clk_en_reassertion(dut):
 
 @cocotb.test(skip=(REGMODE != "noreg" or RDATA_WIDTH != 18 or RADDR_DEPTH != 1024))
 async def tc_03_04_clk_en_toggle_pattern(dut):
-    """TC-03-04: rd_clk_en_i alternated 1/0 each pair — output advances only when rd_clk_en_i=1 (noreg, 18b×1024)."""
+    """TC-03-04: rd_clk_en_i alternated 1/0 each pair — output advances only when rd_clk_en_i=1 (noreg, 18b×1024).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // rd_en_i=1, rd_out_clk_en_i=1; rd_clk_en_i toggled per iteration (noreg, LAT=1)
+    rd_en_i = 1; rd_out_clk_en_i = 1;
+    for (int i = 0; i < 8; i++) begin
+        automatic int addr = i * (RADDR_DEPTH / 8);
+        // rd_clk_en_i=1: drive addr before edge; sample same-edge output (noreg)
+        rd_clk_en_i = 1; rd_addr_i = addr;
+        @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("TC-03-04 clk_en=1 iter=%0d addr=%0d: got=0x%0X exp=0x%0X",
+                      i, addr, rd_data_o, REF[addr]);
+        // rd_clk_en_i=0: drive different address; address register must not advance
+        rd_clk_en_i = 0; rd_addr_i = (addr + RADDR_DEPTH / 2) % RADDR_DEPTH;
+        @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("TC-03-04 clk_en=0 iter=%0d: got=0x%0X expected hold=0x%0X",
+                      i, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     dut.rd_en_i.value         = 1
@@ -622,6 +1040,31 @@ async def tc_03_05_cascaded_clk_en(dut):
     With RADDR_DEPTH=1024 the IP uses two cascaded 36×512 EBR tiles.  The bank
     boundary is at addr 511 (tile 0) / 512 (tile 1).  Toggling rd_clk_en_i while
     reading across that boundary exercises the v2.5.0 cascaded-enable fix.
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // Read addresses {509,510,511,512,513,514} near bank boundary; freeze 2 cycles between reads (LAT=2)
+    for (int k = 0; k < 6; k++) begin
+        automatic int addr = 509 + k;
+        rd_clk_en_i = 1;
+        // single_read(addr)
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(2) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("TC-03-05 addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+        // Freeze rd_clk_en_i for 2 cycles between reads
+        rd_clk_en_i = 0;
+        repeat(2) @(posedge rd_clk_i);
+    end
     """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
@@ -660,7 +1103,34 @@ async def tc_03_05_cascaded_clk_en(dut):
 @cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512
                    or OUTPUT_CLK_EN != 1))
 async def tc_04_01_out_clk_en_zero_freezes_output(dut):
-    """TC-04-01: rd_out_clk_en_i=0 freezes the output register (reg, 36b×512, OUTPUT_CLK_EN=1)."""
+    """TC-04-01: rd_out_clk_en_i=0 freezes the output register (reg, 36b×512, OUTPUT_CLK_EN=1).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // single_read(0) — prime (LAT=2); frozen = REF[0]
+    @(posedge rd_clk_i); rd_addr_i = 0;
+    repeat(2) @(posedge rd_clk_i);
+    assert (rd_data_o === REF[0])
+      else $fatal(1, "TC-04-01 pre-condition: got=0x%0X exp=0x%0X",
+                  rd_data_o, REF[0]);
+    // Return to Active; freeze output register (rd_clk_en_i still 1)
+    @(posedge rd_clk_i);
+    rd_out_clk_en_i = 0;
+    for (int addr = 1; addr <= 8; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        assert (rd_data_o === REF[0])
+          else $error("TC-04-01 addr=%0d: rd_data_o=0x%0X expected frozen=0x%0X",
+                      addr, rd_data_o, REF[0]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await enable_reads(dut)
@@ -695,7 +1165,39 @@ async def tc_04_01_out_clk_en_zero_freezes_output(dut):
 @cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512
                    or OUTPUT_CLK_EN != 1))
 async def tc_04_02_out_clk_en_normal_operation(dut):
-    """TC-04-02: rd_out_clk_en_i=1 — normal 2-cycle latency (reg, 36b×512, OUTPUT_CLK_EN=1)."""
+    """TC-04-02: rd_out_clk_en_i=1 — normal 2-cycle latency (reg, 36b×512, OUTPUT_CLK_EN=1).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // latency_check (n=16, LAT=2)
+    // Prime: fill 2 pipeline stages
+    @(posedge rd_clk_i); rd_addr_i = 0;
+    @(posedge rd_clk_i); rd_addr_i = 1;
+    // Steady: drive addr[i], simultaneously sample addr[i-2]
+    for (int i = 2; i < 16; i++) begin
+        @(posedge rd_clk_i); rd_addr_i = i;
+        assert (rd_data_o === REF[i-2])
+          else $error("[TC-04-02] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
+                      i, i-2, rd_data_o, REF[i-2]);
+    end
+    // Drain: flush last 2 addresses
+    @(posedge rd_clk_i);
+    assert (rd_data_o === REF[14])
+      else $error("[TC-04-02] drain: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
+                  14, rd_data_o, REF[14]);
+    @(posedge rd_clk_i);
+    assert (rd_data_o === REF[15])
+      else $error("[TC-04-02] drain: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
+                  15, rd_data_o, REF[15]);
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await enable_reads(dut)
@@ -705,7 +1207,44 @@ async def tc_04_02_out_clk_en_normal_operation(dut):
 @cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512
                    or OUTPUT_CLK_EN != 1))
 async def tc_04_03_out_clk_en_toggle_mid_seq(dut):
-    """TC-04-03: rd_out_clk_en_i toggled mid-sequence — rd_data_o updates only when it is 1 (reg, 36b×512, OUTPUT_CLK_EN=1)."""
+    """TC-04-03: rd_out_clk_en_i toggled mid-sequence — rd_data_o updates only when it is 1 (reg, 36b×512, OUTPUT_CLK_EN=1).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // Phase 1: single_read(0) to load known output (LAT=2); frozen = REF[0]
+    @(posedge rd_clk_i); rd_addr_i = 0;
+    repeat(2) @(posedge rd_clk_i);
+    assert (rd_data_o === REF[0])
+      else $fatal(1, "TC-04-03 pre-condition: got=0x%0X exp=0x%0X",
+                  rd_data_o, REF[0]);
+    // Return to Active; freeze output register
+    @(posedge rd_clk_i);
+    rd_out_clk_en_i = 0;
+    // Phase 2: 5 cycles with rd_out_clk_en_i=0 — rd_data_o must not change
+    for (int addr = 1; addr <= 5; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        assert (rd_data_o === REF[0])
+          else $error("TC-04-03 frozen phase addr=%0d: got=0x%0X expected 0x%0X",
+                      addr, rd_data_o, REF[0]);
+    end
+    // Return to Active; re-enable output register
+    @(posedge rd_clk_i);
+    rd_out_clk_en_i = 1;
+    // Phase 3: single_read(8) — normal pipelined delivery must resume (LAT=2)
+    @(posedge rd_clk_i); rd_addr_i = 8;
+    repeat(2) @(posedge rd_clk_i);
+    assert (rd_data_o === REF[8])
+      else $error("TC-04-03 resume addr=%0d: got=0x%0X exp=0x%0X",
+                  8, rd_data_o, REF[8]);
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await enable_reads(dut)
@@ -752,7 +1291,39 @@ async def tc_04_03_out_clk_en_toggle_mid_seq(dut):
 @cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512
                    or OUTPUT_CLK_EN != 0))
 async def tc_04_04_output_clk_en_param_zero_no_effect(dut):
-    """TC-04-04: OUTPUT_CLK_EN=0 — rd_out_clk_en_i port has no effect; data flows normally (reg, 36b×512, OUTPUT_CLK_EN=0)."""
+    """TC-04-04: OUTPUT_CLK_EN=0 — rd_out_clk_en_i port has no effect; data flows normally (reg, 36b×512, OUTPUT_CLK_EN=0).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // rd_en_i=1, rd_clk_en_i=1, rd_out_clk_en_i=0 (OUTPUT_CLK_EN=0: gate hardwired open)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 0;
+    // latency_check (n=16, LAT=2)
+    // Prime: fill 2 pipeline stages
+    @(posedge rd_clk_i); rd_addr_i = 0;
+    @(posedge rd_clk_i); rd_addr_i = 1;
+    // Steady: drive addr[i], simultaneously sample addr[i-2]
+    for (int i = 2; i < 16; i++) begin
+        @(posedge rd_clk_i); rd_addr_i = i;
+        assert (rd_data_o === REF[i-2])
+          else $error("[TC-04-04] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
+                      i, i-2, rd_data_o, REF[i-2]);
+    end
+    // Drain: flush last 2 addresses
+    @(posedge rd_clk_i);
+    assert (rd_data_o === REF[14])
+      else $error("[TC-04-04] drain: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
+                  14, rd_data_o, REF[14]);
+    @(posedge rd_clk_i);
+    assert (rd_data_o === REF[15])
+      else $error("[TC-04-04] drain: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
+                  15, rd_data_o, REF[15]);
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
 
@@ -768,7 +1339,34 @@ async def tc_04_04_output_clk_en_param_zero_no_effect(dut):
 @cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 18 or RADDR_DEPTH != 1024
                    or OUTPUT_CLK_EN != 1))
 async def tc_04_05_both_enables_deasserted(dut):
-    """TC-04-05: rd_clk_en_i=0 and rd_out_clk_en_i=0 simultaneously — rd_data_o holds last value (reg, 18b×1024, OUTPUT_CLK_EN=1)."""
+    """TC-04-05: rd_clk_en_i=0 and rd_out_clk_en_i=0 simultaneously — rd_data_o holds last value (reg, 18b×1024, OUTPUT_CLK_EN=1).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // single_read(0) — prime (LAT=2); frozen = REF[0]
+    @(posedge rd_clk_i); rd_addr_i = 0;
+    repeat(2) @(posedge rd_clk_i);
+    assert (rd_data_o === REF[0])
+      else $fatal(1, "TC-04-05 pre-condition: got=0x%0X exp=0x%0X",
+                  rd_data_o, REF[0]);
+    // Return to Active; de-assert both enables simultaneously
+    @(posedge rd_clk_i);
+    rd_clk_en_i = 0; rd_out_clk_en_i = 0;
+    for (int addr = 1; addr <= 8; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        assert (rd_data_o === REF[0])
+          else $error("TC-04-05 addr=%0d: rd_data_o=0x%0X expected frozen=0x%0X",
+                      addr, rd_data_o, REF[0]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await enable_reads(dut)
@@ -807,7 +1405,33 @@ async def tc_04_05_both_enables_deasserted(dut):
 
 @cocotb.test(skip=(REGMODE != "reg" or RESETMODE != "sync" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
 async def tc_05_01_sync_reset_clears_output(dut):
-    """TC-05-01: Sync reset holds rd_data_o=0 while rst_i=1 (reg, sync)."""
+    """TC-05-01: Sync reset holds rd_data_o=0 while rst_i=1 (reg, sync).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // Fill pipeline at addr=0 (LAT+1 edges) so rd_data_o holds REF[0]
+    rd_addr_i = 0;
+    repeat(LAT + 1) @(posedge rd_clk_i);
+    assert (rd_data_o === REF[0])
+      else $fatal(1, "TC-05-01 pre-condition failed: got=0x%0X", rd_data_o);
+    // Assert sync reset; verify output clears on every rising edge for 5 cycles
+    rst_i = 1;
+    for (int cycle = 0; cycle < 5; cycle++) begin
+        @(posedge rd_clk_i);
+        assert (rd_data_o === 0)
+          else $fatal(1, "TC-05-01 FAILED at reset cycle %0d: rd_data_o=0x%0X, expected 0",
+                      cycle, rd_data_o);
+    end
+    rst_i = 0;
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await enable_reads(dut)
@@ -837,7 +1461,31 @@ async def tc_05_01_sync_reset_clears_output(dut):
 
 @cocotb.test(skip=(REGMODE != "reg" or RESETMODE != "sync" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
 async def tc_05_02_sync_reset_during_read(dut):
-    """TC-05-02: Sync reset asserted mid-sequence clears output on next clock (reg, sync)."""
+    """TC-05-02: Sync reset asserted mid-sequence clears output on next clock (reg, sync).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // Prime pipeline: LAT+2 rising edges
+    for (int addr = 0; addr <= LAT + 1; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+    end
+    // Assert reset mid-sequence (between clock edges)
+    rst_i = 1;
+    // One rising edge with rst_i=1 must clear the output register
+    @(posedge rd_clk_i);
+    assert (rd_data_o === 0)
+      else $fatal(1, "TC-05-02 FAILED: rd_data_o=0x%0X one cycle after sync reset, expected 0",
+                  rd_data_o);
+    rst_i = 0;
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await enable_reads(dut)
@@ -864,7 +1512,29 @@ async def tc_05_02_sync_reset_during_read(dut):
 
 @cocotb.test(skip=(REGMODE != "reg" or RESETMODE != "sync" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
 async def tc_05_03_sync_reset_release_resumes(dut):
-    """TC-05-03: Normal reads resume correctly after sync reset release (reg, sync)."""
+    """TC-05-03: Normal reads resume correctly after sync reset release (reg, sync).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // Assert reset for 3 cycles then release
+    rst_i = 1;
+    repeat(3) @(posedge rd_clk_i);
+    rst_i = 0;
+    // single_read(RADDR_DEPTH/4) (LAT=2)
+    @(posedge rd_clk_i); rd_addr_i = RADDR_DEPTH / 4;
+    repeat(2) @(posedge rd_clk_i);
+    assert (rd_data_o === REF[RADDR_DEPTH/4])
+      else $fatal(1, "TC-05-03 FAILED after reset release: addr=%0d got=0x%0X exp=0x%0X",
+                  RADDR_DEPTH/4, rd_data_o, REF[RADDR_DEPTH/4]);
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await enable_reads(dut)
@@ -887,7 +1557,32 @@ async def tc_05_03_sync_reset_release_resumes(dut):
 
 @cocotb.test(skip=(REGMODE != "reg" or RESETMODE != "async" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
 async def tc_05_04_async_reset_clears_immediately(dut):
-    """TC-05-04: Async rst_i clears rd_data_o before the next clock edge (reg, async)."""
+    """TC-05-04: Async rst_i clears rd_data_o before the next clock edge (reg, async).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // Fill pipeline at addr=0 (LAT+1 edges) so rd_data_o holds REF[0]
+    rd_addr_i = 0;
+    repeat(LAT + 1) @(posedge rd_clk_i);
+    assert (rd_data_o === REF[0])
+      else $fatal(1, "TC-05-04 pre-condition failed: got=0x%0X", rd_data_o);
+    // Assert reset asynchronously mid-cycle (CLK_NS/4 after last posedge)
+    #(CLK_NS/4); rst_i = 1;
+    // Allow 1 ns propagation then sample
+    #1;
+    assert (rd_data_o === 0)
+      else $fatal(1, "TC-05-04 FAILED: async reset did not clear rd_data_o immediately; got=0x%0X",
+                  rd_data_o);
+    rst_i = 0;
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await enable_reads(dut)
@@ -917,7 +1612,29 @@ async def tc_05_04_async_reset_clears_immediately(dut):
 
 @cocotb.test(skip=(REGMODE != "reg" or RESETMODE != "async" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
 async def tc_05_05_async_reset_release_resumes(dut):
-    """TC-05-05: Output register operational after async reset release (reg, async)."""
+    """TC-05-05: Output register operational after async reset release (reg, async).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // Assert reset asynchronously then release mid-cycle
+    #(CLK_NS/4); rst_i = 1;
+    #(CLK_NS/2); rst_i = 0;
+    // Sync back to clock edge, then single_read(RADDR_DEPTH/4) (LAT=2)
+    @(posedge rd_clk_i);
+    @(posedge rd_clk_i); rd_addr_i = RADDR_DEPTH / 4;
+    repeat(2) @(posedge rd_clk_i);
+    assert (rd_data_o === REF[RADDR_DEPTH/4])
+      else $fatal(1, "TC-05-05 FAILED after async reset release: addr=%0d got=0x%0X exp=0x%0X",
+                  RADDR_DEPTH/4, rd_data_o, REF[RADDR_DEPTH/4]);
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await enable_reads(dut)
@@ -946,6 +1663,35 @@ async def tc_05_06_noreg_reset_has_no_effect(dut):
 
     Despite the noreg label, the LIFCL PDPSC16K output bus is gated by rst_i:
     synchronous reset forces rd_data_o to 0 on every rising edge while rst_i=1.
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // Phase 1: rst_i=1 — rd_data_o must be 0 at every address (noreg, LAT=1)
+    rst_i = 1;
+    for (int addr = 0; addr < 16 && addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        assert (rd_data_o === 0)
+          else $error("TC-05-06 rst_i=1 addr=%0d: got=0x%0X expected 0x0",
+                      addr, rd_data_o);
+    end
+    // Phase 2: de-assert rst_i; verify reads resume correctly (LAT=1)
+    @(posedge rd_clk_i);
+    rst_i = 0;
+    for (int addr = 0; addr < 8 && addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(1) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("TC-05-06 post-reset addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
     """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
@@ -988,7 +1734,26 @@ async def tc_05_06_noreg_reset_has_no_effect(dut):
 
 @cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 512 or INIT_MODE != "all_zero"))
 async def tc_06_01_all_zero_init(dut):
-    """TC-06-01: INIT_MODE=all_zero — all 512 locations return 0 (36b×512)."""
+    """TC-06-01: INIT_MODE=all_zero — all 512 locations return 0 (36b×512).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-06-01] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep(dut, "TC-06-01")
@@ -996,7 +1761,26 @@ async def tc_06_01_all_zero_init(dut):
 
 @cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 512 or INIT_MODE != "all_one"))
 async def tc_06_02_all_one_init(dut):
-    """TC-06-02: INIT_MODE=all_one — all 512 locations return DATA_MASK (36b×512)."""
+    """TC-06-02: INIT_MODE=all_one — all 512 locations return DATA_MASK (36b×512).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-06-02] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep(dut, "TC-06-02")
@@ -1005,7 +1789,26 @@ async def tc_06_02_all_one_init(dut):
 @cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 512
                    or INIT_MODE != "mem_file" or INIT_FILE_FORMAT != "hex"))
 async def tc_06_03_mem_file_hex(dut):
-    """TC-06-03: INIT_MODE=mem_file, hex format — all 512 locations match INIT_FILE content (36b×512)."""
+    """TC-06-03: INIT_MODE=mem_file, hex format — all 512 locations match INIT_FILE content (36b×512).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-06-03] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep(dut, "TC-06-03")
@@ -1014,7 +1817,26 @@ async def tc_06_03_mem_file_hex(dut):
 @cocotb.test(skip=(RDATA_WIDTH != 18 or RADDR_DEPTH != 1024
                    or INIT_MODE != "mem_file" or INIT_FILE_FORMAT != "binary"))
 async def tc_06_04_mem_file_binary(dut):
-    """TC-06-04: INIT_MODE=mem_file, binary format — all 1024 locations match INIT_FILE content (18b×1024)."""
+    """TC-06-04: INIT_MODE=mem_file, binary format — all 1024 locations match INIT_FILE content (18b×1024).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-06-04] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep(dut, "TC-06-04")
@@ -1022,7 +1844,27 @@ async def tc_06_04_mem_file_binary(dut):
 
 @cocotb.test(skip=(RDATA_WIDTH != 9 or RADDR_DEPTH != 2048 or INIT_MODE != "mem_file"))
 async def tc_06_05_mem_file_alternating_pattern(dut):
-    """TC-06-05: INIT_MODE=mem_file, alternating 0xAA/0x55 — verified then swept (9b×2048)."""
+    """TC-06-05: INIT_MODE=mem_file, alternating 0xAA/0x55 — verified then swept (9b×2048).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // pre-condition: REF encodes alternating 0xAA/0x55 pattern (verified by Python assert)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-06-05] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     # Verify the reference model loaded the expected alternating content.
     EVEN_VAL = 0x0AA & DATA_MASK
     ODD_VAL  = 0x055 & DATA_MASK
@@ -1041,7 +1883,27 @@ async def tc_06_05_mem_file_alternating_pattern(dut):
 @cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 512
                    or INIT_MODE != "mem_file" or INIT_FILE_FORMAT != "hex"))
 async def tc_06_06_mem_file_addr_as_data(dut):
-    """TC-06-06: INIT_MODE=mem_file, addr-as-data — mem[i]=i verified for all 512 entries (36b×512)."""
+    """TC-06-06: INIT_MODE=mem_file, addr-as-data — mem[i]=i verified for all 512 entries (36b×512).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // pre-condition: REF encodes addr-as-data pattern (mem[i]=i, verified by Python assert)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-06-06] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     # Confirm the fixture encodes address-as-data before exercising the hardware.
     for i in range(RADDR_DEPTH):
         assert REF[i] == i, (
@@ -1056,7 +1918,26 @@ async def tc_06_06_mem_file_addr_as_data(dut):
 
 @cocotb.test(skip=(RDATA_WIDTH != 1 or RADDR_DEPTH != 16384 or INIT_MODE != "all_zero"))
 async def tc_06_07_all_zero_narrow(dut):
-    """TC-06-07: INIT_MODE=all_zero, 1b×16384 — all 16384 locations return 0."""
+    """TC-06-07: INIT_MODE=all_zero, 1b×16384 — all 16384 locations return 0.
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-06-07] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep(dut, "TC-06-07")
@@ -1065,7 +1946,26 @@ async def tc_06_07_all_zero_narrow(dut):
 @cocotb.test(skip=(RDATA_WIDTH != 4 or RADDR_DEPTH != 4096
                    or INIT_MODE != "mem_file" or INIT_FILE_FORMAT != "binary"))
 async def tc_06_08_mem_file_binary_narrow(dut):
-    """TC-06-08: INIT_MODE=mem_file, binary format, 4b×4096 — all locations match INIT_FILE content."""
+    """TC-06-08: INIT_MODE=mem_file, binary format, 4b×4096 — all locations match INIT_FILE content.
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-06-08] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep(dut, "TC-06-08")
@@ -1076,7 +1976,26 @@ async def tc_06_08_mem_file_binary_narrow(dut):
 
 @cocotb.test(skip=(RDATA_WIDTH != 1 or RADDR_DEPTH != 2 or INIT_MODE != "all_zero"))
 async def tc_07_01_minimum_config(dut):
-    """TC-07-01: Minimum config — 1b×2, all_zero; verifies correct tile selection at smallest dimensions."""
+    """TC-07-01: Minimum config — 1b×2, all_zero; verifies correct tile selection at smallest dimensions.
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-07-01] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep(dut, "TC-07-01")
@@ -1084,7 +2003,26 @@ async def tc_07_01_minimum_config(dut):
 
 @cocotb.test(skip=(RDATA_WIDTH != 1 or RADDR_DEPTH != 16384 or INIT_MODE != "mem_file"))
 async def tc_07_02_1bit_max_depth(dut):
-    """TC-07-02: 1b×16384 — full depth sweep at maximum single-tile depth."""
+    """TC-07-02: 1b×16384 — full depth sweep at maximum single-tile depth.
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-07-02] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep(dut, "TC-07-02")
@@ -1092,7 +2030,26 @@ async def tc_07_02_1bit_max_depth(dut):
 
 @cocotb.test(skip=(RDATA_WIDTH != 2 or RADDR_DEPTH != 8192 or INIT_MODE != "mem_file"))
 async def tc_07_03_2bit_8192(dut):
-    """TC-07-03: 2b×8192 — full depth sweep."""
+    """TC-07-03: 2b×8192 — full depth sweep.
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-07-03] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep(dut, "TC-07-03")
@@ -1100,7 +2057,26 @@ async def tc_07_03_2bit_8192(dut):
 
 @cocotb.test(skip=(RDATA_WIDTH != 4 or RADDR_DEPTH != 4096 or INIT_MODE != "mem_file"))
 async def tc_07_04_4bit_4096(dut):
-    """TC-07-04: 4b×4096 — full depth sweep."""
+    """TC-07-04: 4b×4096 — full depth sweep.
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-07-04] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep(dut, "TC-07-04")
@@ -1108,7 +2084,26 @@ async def tc_07_04_4bit_4096(dut):
 
 @cocotb.test(skip=(RDATA_WIDTH != 9 or RADDR_DEPTH != 2048 or INIT_MODE != "mem_file"))
 async def tc_07_05_9bit_2048_parity(dut):
-    """TC-07-05: 9b×2048 (parity width) — full depth sweep."""
+    """TC-07-05: 9b×2048 (parity width) — full depth sweep.
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-07-05] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep(dut, "TC-07-05")
@@ -1116,7 +2111,26 @@ async def tc_07_05_9bit_2048_parity(dut):
 
 @cocotb.test(skip=(RDATA_WIDTH != 18 or RADDR_DEPTH != 1024 or INIT_MODE != "mem_file"))
 async def tc_07_06_18bit_1024_parity(dut):
-    """TC-07-06: 18b×1024 (parity width) — full depth sweep."""
+    """TC-07-06: 18b×1024 (parity width) — full depth sweep.
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-07-06] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep(dut, "TC-07-06")
@@ -1124,7 +2138,26 @@ async def tc_07_06_18bit_1024_parity(dut):
 
 @cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 512 or INIT_MODE != "mem_file"))
 async def tc_07_07_36bit_512_default(dut):
-    """TC-07-07: 36b×512 (default tile) — full depth sweep."""
+    """TC-07-07: 36b×512 (default tile) — full depth sweep.
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-07-07] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep(dut, "TC-07-07")
@@ -1132,7 +2165,26 @@ async def tc_07_07_36bit_512_default(dut):
 
 @cocotb.test(skip=(RDATA_WIDTH != 12 or RADDR_DEPTH != 512 or INIT_MODE != "mem_file"))
 async def tc_07_08_non_aligned_width(dut):
-    """TC-07-08: 12b×512 (non-aligned width) — IP selects optimal tile; full sweep passes."""
+    """TC-07-08: 12b×512 (non-aligned width) — IP selects optimal tile; full sweep passes.
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-07-08] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep(dut, "TC-07-08")
@@ -1143,7 +2195,26 @@ async def tc_07_08_non_aligned_width(dut):
 
 @cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 1024 or INIT_MODE != "mem_file"))
 async def tc_08_01_addr_cascade_x2(dut):
-    """TC-08-01: Address cascade ×2 — all 1024 locations correct; bank boundary transparent (36b×1024)."""
+    """TC-08-01: Address cascade ×2 — all 1024 locations correct; bank boundary transparent (36b×1024).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-08-01] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep(dut, "TC-08-01")
@@ -1151,7 +2222,26 @@ async def tc_08_01_addr_cascade_x2(dut):
 
 @cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 2048 or INIT_MODE != "mem_file"))
 async def tc_08_02_addr_cascade_x4(dut):
-    """TC-08-02: Address cascade ×4 — all 2048 locations correct (36b×2048)."""
+    """TC-08-02: Address cascade ×4 — all 2048 locations correct (36b×2048).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-08-02] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep(dut, "TC-08-02")
@@ -1159,7 +2249,26 @@ async def tc_08_02_addr_cascade_x4(dut):
 
 @cocotb.test(skip=(RDATA_WIDTH != 72 or RADDR_DEPTH != 512 or INIT_MODE != "mem_file"))
 async def tc_08_03_data_cascade_x2(dut):
-    """TC-08-03: Data cascade ×2 — all 72-bit words correct across both tiles (72b×512)."""
+    """TC-08-03: Data cascade ×2 — all 72-bit words correct across both tiles (72b×512).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-08-03] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep(dut, "TC-08-03")
@@ -1167,7 +2276,26 @@ async def tc_08_03_data_cascade_x2(dut):
 
 @cocotb.test(skip=(RDATA_WIDTH != 144 or RADDR_DEPTH != 512 or INIT_MODE != "mem_file"))
 async def tc_08_04_data_cascade_x4(dut):
-    """TC-08-04: Data cascade ×4 — all 144-bit words correct across four tiles (144b×512)."""
+    """TC-08-04: Data cascade ×4 — all 144-bit words correct across four tiles (144b×512).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-08-04] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep(dut, "TC-08-04")
@@ -1175,7 +2303,26 @@ async def tc_08_04_data_cascade_x4(dut):
 
 @cocotb.test(skip=(RDATA_WIDTH != 72 or RADDR_DEPTH != 1024 or INIT_MODE != "mem_file"))
 async def tc_08_05_both_cascades(dut):
-    """TC-08-05: Addr×2 + Data×2 cascades — all 1024×72-bit locations correct (72b×1024)."""
+    """TC-08-05: Addr×2 + Data×2 cascades — all 1024×72-bit locations correct (72b×1024).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-08-05] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep(dut, "TC-08-05")
@@ -1183,7 +2330,32 @@ async def tc_08_05_both_cascades(dut):
 
 @cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 1024 or INIT_MODE != "mem_file"))
 async def tc_08_06_bank_boundary_read(dut):
-    """TC-08-06: Bank boundary — addr=511 (last in bank 0) and addr=512 (first in bank 1) each return correct data (36b×1024)."""
+    """TC-08-06: Bank boundary — addr=511 (last in bank 0) and addr=512 (first in bank 1) each return correct data (36b×1024).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // pre-condition: REF[511] != REF[512] (verified by Python assert)
+    // single_read(511) (LAT substituted per REGMODE)
+    @(posedge rd_clk_i); rd_addr_i = 511;
+    repeat(LAT) @(posedge rd_clk_i);
+    assert (rd_data_o === REF[511])
+      else $error("TC-08-06 addr=511: got=0x%0X exp=0x%0X",
+                  rd_data_o, REF[511]);
+    // single_read(512)
+    @(posedge rd_clk_i); rd_addr_i = 512;
+    repeat(LAT) @(posedge rd_clk_i);
+    assert (rd_data_o === REF[512])
+      else $error("TC-08-06 addr=512: got=0x%0X exp=0x%0X",
+                  rd_data_o, REF[512]);
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await enable_reads(dut)
@@ -1214,7 +2386,43 @@ async def tc_08_06_bank_boundary_read(dut):
 
 @cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 1024 or INIT_MODE != "mem_file"))
 async def tc_08_07_addr_cascade_clk_en_toggle(dut):
-    """TC-08-07: clk_en toggle across bank boundary — v2.5.0: no spurious data from wrong bank (36b×1024)."""
+    """TC-08-07: clk_en toggle across bank boundary — v2.5.0: no spurious data from wrong bank (36b×1024).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // Phase 1: single_read(511) to prime the pipeline; frozen = REF[511]
+    @(posedge rd_clk_i); rd_addr_i = 511;
+    repeat(LAT) @(posedge rd_clk_i);
+    assert (rd_data_o === REF[511])
+      else $fatal(1, "TC-08-07 pre-condition: got=0x%0X exp=0x%0X",
+                  rd_data_o, REF[511]);
+    // Return to Active; de-assert rd_clk_en_i
+    @(posedge rd_clk_i);
+    rd_clk_en_i = 0;
+    // Phase 2: drive addresses crossing bank boundary while frozen — output must hold at REF[511]
+    for (int addr = 512; addr <= 514; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        assert (rd_data_o === REF[511])
+          else $error("TC-08-07 frozen phase addr=%0d: got=0x%0X expected frozen=0x%0X",
+                      addr, rd_data_o, REF[511]);
+    end
+    // Phase 3: re-assert rd_clk_en_i; single_read(515)
+    @(posedge rd_clk_i);
+    rd_clk_en_i = 1;
+    @(posedge rd_clk_i); rd_addr_i = 515;
+    repeat(LAT) @(posedge rd_clk_i);
+    assert (rd_data_o === REF[515])
+      else $error("TC-08-07 resume addr=515: got=0x%0X exp=0x%0X",
+                  rd_data_o, REF[515]);
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await enable_reads(dut)
@@ -1262,7 +2470,26 @@ async def tc_08_07_addr_cascade_clk_en_toggle(dut):
 @cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 2048
                    or INIT_MODE != "mem_file" or REGMODE != "reg"))
 async def tc_08_08_addr_cascade_reg_mode(dut):
-    """TC-08-08: Address cascade ×4, REGMODE=reg — LAT=2 verified across all four banks (36b×2048)."""
+    """TC-08-08: Address cascade ×4, REGMODE=reg — LAT=2 verified across all four banks (36b×2048).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep (LAT=2)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(2) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-08-08] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep(dut, "TC-08-08")
@@ -1273,7 +2500,27 @@ async def tc_08_08_addr_cascade_reg_mode(dut):
 
 @cocotb.test(skip=(ECC_ENABLE != 0 or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
 async def tc_09_01_ecc_disabled_outputs_zero(dut):
-    """TC-09-01: ECC_ENABLE=0 — one_err_det_o and two_err_det_o are 0 at all times (36b×512)."""
+    """TC-09-01: ECC_ENABLE=0 — one_err_det_o and two_err_det_o are 0 at all times (36b×512).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // enable_reads
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    // single_read_ecc for first 16 addresses (LAT substituted per REGMODE)
+    for (int addr = 0; addr < 16 && addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (one_err_det_o === 0 && two_err_det_o === 0)
+          else $error("TC-09-01 addr=%0d: one_err_det_o=%0d two_err_det_o=%0d (expected both 0)",
+                      addr, one_err_det_o, two_err_det_o);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await enable_reads(dut)
@@ -1299,7 +2546,29 @@ async def tc_09_01_ecc_disabled_outputs_zero(dut):
 
 @cocotb.test(skip=(ECC_ENABLE != 1 or RDATA_WIDTH != 32 or RADDR_DEPTH != 512))
 async def tc_09_02_ecc_enabled_clean_data(dut):
-    """TC-09-02: ECC_ENABLE=1, clean init data — rd_data_o correct; no error flags asserted (32b×512)."""
+    """TC-09-02: ECC_ENABLE=1, clean init data — rd_data_o correct; no error flags asserted (32b×512).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep_ecc (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-09-02] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+        assert (one_err_det_o === 0 && two_err_det_o === 0)
+          else $error("[TC-09-02] addr=%0d: one_err_det_o=%0d two_err_det_o=%0d (expected both 0)",
+                      addr, one_err_det_o, two_err_det_o);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep_ecc(dut, "TC-09-02")
@@ -1307,7 +2576,29 @@ async def tc_09_02_ecc_enabled_clean_data(dut):
 
 @cocotb.test(skip=(ECC_ENABLE != 1 or RDATA_WIDTH != 32))
 async def tc_09_03_ecc_minimum_width(dut):
-    """TC-09-03: ECC_ENABLE=1, RDATA_WIDTH=32 (minimum ECC width) — full sweep, no false error flags."""
+    """TC-09-03: ECC_ENABLE=1, RDATA_WIDTH=32 (minimum ECC width) — full sweep, no false error flags.
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep_ecc (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-09-03] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+        assert (one_err_det_o === 0 && two_err_det_o === 0)
+          else $error("[TC-09-03] addr=%0d: one_err_det_o=%0d two_err_det_o=%0d (expected both 0)",
+                      addr, one_err_det_o, two_err_det_o);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep_ecc(dut, "TC-09-03")
@@ -1315,7 +2606,29 @@ async def tc_09_03_ecc_minimum_width(dut):
 
 @cocotb.test(skip=(ECC_ENABLE != 1 or RDATA_WIDTH != 64 or RADDR_DEPTH != 512))
 async def tc_09_04_ecc_maximum_width(dut):
-    """TC-09-04: ECC_ENABLE=1, RDATA_WIDTH=64 (maximum ECC width) — full sweep, no false error flags (64b×512)."""
+    """TC-09-04: ECC_ENABLE=1, RDATA_WIDTH=64 (maximum ECC width) — full sweep, no false error flags (64b×512).
+
+    Verilog equivalent
+    ------------------
+    // clock: rd_clk_i, period = CLK_NS (10 ns)
+    // do_reset
+    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
+    #100;
+    rst_i = 0;
+    @(posedge rd_clk_i);
+    // full_sweep_ecc (LAT substituted per REGMODE)
+    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
+    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
+        @(posedge rd_clk_i); rd_addr_i = addr;
+        repeat(LAT) @(posedge rd_clk_i);
+        assert (rd_data_o === REF[addr])
+          else $error("[TC-09-04] addr=%0d: got=0x%0X exp=0x%0X",
+                      addr, rd_data_o, REF[addr]);
+        assert (one_err_det_o === 0 && two_err_det_o === 0)
+          else $error("[TC-09-04] addr=%0d: one_err_det_o=%0d two_err_det_o=%0d (expected both 0)",
+                      addr, one_err_det_o, two_err_det_o);
+    end
+    """
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut)
     await full_sweep_ecc(dut, "TC-09-04")
@@ -1333,6 +2646,10 @@ async def tc_09_05_sec_single_bit_error(dut):
     by computing the ECC polynomial externally and flipping one parity or data bit.
 
     Set ECC_ERROR_INJECT=1 to un-skip this test once the infrastructure is ready.
+
+    Verilog equivalent
+    ------------------
+    // Not yet implemented — requires pre-corrupted INIT_FILE and ECC_ERROR_INJECT=1
     """
     raise NotImplementedError(
         "TC-09-05: error injection infrastructure not yet implemented. "
@@ -1350,6 +2667,10 @@ async def tc_09_06_ded_double_bit_error(dut):
     double-bit error, so rd_data_o is undefined; only the flag output is checked.
 
     Set ECC_ERROR_INJECT=1 to un-skip once the pre-corrupted fixture is in place.
+
+    Verilog equivalent
+    ------------------
+    // Not yet implemented — requires pre-corrupted INIT_FILE and ECC_ERROR_INJECT=1
     """
     raise NotImplementedError(
         "TC-09-06: error injection infrastructure not yet implemented. "
@@ -1367,9 +2688,12 @@ async def tc_09_07_ecc_error_recovery(dut):
     addresses (addr=1…8) and verifies one_err_det_o and two_err_det_o are both 0.
 
     Set ECC_ERROR_INJECT=1 to un-skip once the pre-corrupted fixture is in place.
+
+    Verilog equivalent
+    ------------------
+    // Not yet implemented — requires pre-corrupted INIT_FILE and ECC_ERROR_INJECT=1
     """
     raise NotImplementedError(
         "TC-09-07: error injection infrastructure not yet implemented. "
         "Provide a pre-corrupted INIT_FILE and set ECC_ERROR_INJECT=1."
     )
-
