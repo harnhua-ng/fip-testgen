@@ -71,8 +71,9 @@ SIM_ARGS += -L $(DEVICE_FAMILY)
 RESULTS_DIR := $(CURDIR)/results
 _WLF_TAG    := $(REGMODE)_$(RDATA_WIDTH)b_d$(RADDR_DEPTH)_$(RESETMODE)
 _WLF_TC     := $(if $(TESTCASE),_$(TESTCASE),_all)
+WLF_FILE    ?= $(RESULTS_DIR)/$(_WLF_TAG)$(_WLF_TC).wlf
 SIM_ARGS    += -voptargs="-access=rw+/. +acc" -suppress 12130
-SIM_ARGS    += -wlf $(RESULTS_DIR)/$(_WLF_TAG)$(_WLF_TC).wlf
+SIM_ARGS    += -wlf $(WLF_FILE)
 
 # run simulation
 SIM_ARGS    += -do "log -r /*; run -all; quit"

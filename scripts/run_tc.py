@@ -246,6 +246,7 @@ def run_sim(tc_id, tc):
     sim_build   = os.path.join(REPO_ROOT, "sim_build", "tc-" + tc_id)
     log_file    = os.path.join(results_dir, "tc-" + tc_id + ".log")
 
+    _, wlf_rel = _artifact_paths(tc_id)
     cmd = [
         "make", "-C", REPO_ROOT, "sim",
         "REGMODE="         + tc.regmode,
@@ -258,6 +259,7 @@ def run_sim(tc_id, tc):
         "INIT_FILE_FORMAT=" + tc.init_file_format,
         "TESTCASE="        + tc.testcase,
         "SIM_BUILD="       + sim_build,
+        "WLF_FILE="        + os.path.join(REPO_ROOT, wlf_rel),
     ]
     if tc.init_file is not None:
         cmd.append("INIT_FILE=" + tc.init_file)
@@ -310,32 +312,56 @@ def _parse_log(log_file):
     return None
 
 
+def _artifact_paths(tc_id):
+    """Return (log_relpath, wlf_relpath) relative to REPO_ROOT."""
+    stem = "tc-" + tc_id
+    return os.path.join("results", stem + ".log"), os.path.join("results", stem + ".wlf")
+
+
 def _print_group_summary(tg_id, tc_ids, failures):
     results_dir = os.path.join(REPO_ROOT, "results")
-    W = 74
+    W = 58
 
     rows = []
     for tc_id in tc_ids:
+        tc     = TC_MAP[tc_id]
         log    = os.path.join(results_dir, "tc-" + tc_id + ".log")
         parsed = _parse_log(log)
         if parsed:
-            status, sim_ns, real_s, ratio = parsed
+            status, sim_ns, real_s, _ = parsed
         else:
             status = "FAIL" if tc_id in failures else "SKIP"
-            sim_ns = real_s = ratio = None
-        rows.append((tc_id, status, sim_ns, real_s, ratio))
+            sim_ns = real_s = None
+        log_rel, wlf_rel = _artifact_paths(tc_id)
+        rows.append((tc_id, status, sim_ns, real_s, log_rel, wlf_rel))
 
+    # ── Artifacts table ───────────────────────────────────────────────────
+    log_w = max(len(r[4]) for r in rows)
+    wlf_w = max(len(r[5]) for r in rows)
+    art_W = 10 + 2 + log_w + 2 + wlf_w + 2
     print("")
-    print("=" * W)
+    print("=" * art_W)
+    print("  TG-{} — Artifacts".format(tg_id))
+    print("=" * art_W)
+    print("  {:<10}  {:<{}}  {:<{}}".format("TC", "LOG", log_w, "WAVEFORM", wlf_w))
+    print("  " + "-" * (art_W - 2))
+    for tc_id, status, sim_ns, real_s, log_rel, wlf_rel in rows:
+        print("  {:<10}  {:<{}}  {:<{}}".format(
+            "TC-" + tc_id, log_rel, log_w, wlf_rel, wlf_w))
+
+    # ── Results table ─────────────────────────────────────────────────────
+    res_W = 58
+    print("")
+    print("=" * res_W)
     print("  TG-{} — Results".format(tg_id))
-    print("=" * W)
-    print("  {:<10}  {:>6}  {:>13}  {:>13}  {:>12}".format(
-        "TC", "STATUS", "SIM TIME (ns)", "REAL TIME (s)", "RATIO (ns/s)"))
-    print("  " + "-" * (W - 2))
+    print("=" * res_W)
+    print("  {:<10}  {:>6}  {:>13}  {:>13}".format(
+        "TC", "STATUS", "SIM TIME (ns)", "REAL TIME (s)"))
+    print("  " + "-" * (res_W - 2))
 
     pass_c = fail_c = skip_c = 0
     total_ns = total_real = 0.0
-    for tc_id, status, sim_ns, real_s, ratio in rows:
+    for tc_id, status, sim_ns, real_s, log_rel, wlf_rel in rows:
         if   status == "PASS": pass_c += 1
         elif status == "FAIL": fail_c += 1
         else:                  skip_c += 1
@@ -344,20 +370,19 @@ def _print_group_summary(tg_id, tc_ids, failures):
             total_real += real_s
         ns_s    = "{:>13.2f}".format(sim_ns) if sim_ns is not None else "{:>13}".format("--")
         real_s2 = "{:>13.2f}".format(real_s) if real_s is not None else "{:>13}".format("--")
-        rat_s   = "{:>12.2f}".format(ratio)  if ratio  is not None else "{:>12}".format("--")
-        print("  {:<10}  {:>6}  {}  {}  {}".format("TC-" + tc_id, status, ns_s, real_s2, rat_s))
+        print("  {:<10}  {:>6}  {}  {}".format("TC-" + tc_id, status, ns_s, real_s2))
 
     n = len(rows)
-    print("  " + "-" * (W - 2))
+    print("  " + "-" * (res_W - 2))
     print("  TESTS={}  PASS={}  FAIL={}  SKIP={}  {:>13.2f}  {:>13.2f}".format(
         n, pass_c, fail_c, skip_c, total_ns, total_real))
-    print("=" * W)
+    print("=" * res_W)
     if failures:
         print("  TG-{}: {} FAILED — {}".format(
             tg_id, len(failures), ", ".join("TC-" + f for f in failures)))
     else:
         print("  TG-{}: all {} passed".format(tg_id, n))
-    print("=" * W)
+    print("=" * res_W)
 
 
 # ─── parsing ─────────────────────────────────────────────────────────────────
