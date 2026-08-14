@@ -39,10 +39,11 @@ REGMODE       ?= noreg
 RESETMODE     ?= sync
 OUTPUT_CLK_EN ?= 0
 ECC_ENABLE    ?= 0
-INIT_MODE     ?= all_one
-INIT_FILE     ?= $(CURDIR)/testbench/rom_init.hex
-DEVICE_FAMILY ?= lifcl
-export RDATA_WIDTH RADDR_DEPTH REGMODE RESETMODE OUTPUT_CLK_EN ECC_ENABLE INIT_MODE INIT_FILE DEVICE_FAMILY
+INIT_MODE        ?= all_one
+INIT_FILE        ?= $(CURDIR)/testbench/rom_init.hex
+INIT_FILE_FORMAT ?= hex
+DEVICE_FAMILY    ?= lifcl
+export RDATA_WIDTH RADDR_DEPTH REGMODE RESETMODE OUTPUT_CLK_EN ECC_ENABLE INIT_MODE INIT_FILE INIT_FILE_FORMAT DEVICE_FAMILY
 
 # Optional: run a single test case
 # Example: make TESTCASE=tc_01_01_sequential_read_noreg
@@ -109,8 +110,13 @@ clean::
 # ==============================================================================
 # all_configs — run every required parameter combination in sequence
 #
-# Target names encode: REGMODE_RDATA_RADDR_RESETMODE
-# All other parameters default (OUTPUT_CLK_EN=0, ECC_ENABLE=0, INIT_MODE=all_one).
+# Target names encode: REGMODE_RDATA_RADDR_RESETMODE[_TOKEN...]
+# Recognised 5th/6th word tokens:
+#   memfile   → INIT_MODE=mem_file     (no underscore in name avoids word-split clash)
+#   allzero   → INIT_MODE=all_zero     (TG-06 all-zero tests)
+#   outclken  → OUTPUT_CLK_EN=1        (TG-04 tests)
+#   ecc       → ECC_ENABLE=1           (TG-09 tests)
+# Tokens may appear in either order (word 5 or word 6).
 #
 # Each config gets its own SIM_BUILD directory so parallel execution is safe
 # and compile artifacts from one run do not bleed into another.
@@ -118,19 +124,27 @@ clean::
 # Add entries here as TG-06 through TG-09 are implemented and need new combos.
 # ==============================================================================
 ALL_CONFIGS := \
-    noreg_36_512_sync         \
-    reg_36_512_sync           \
-    reg_36_512_async          \
-    reg_18_1024_sync          \
-    noreg_9_2048_sync         \
-    noreg_18_1024_sync        \
-    reg_36_1024_sync          \
-    noreg_36_512_sync_memfile
+    noreg_36_512_sync              \
+    reg_36_512_sync                \
+    reg_36_512_async               \
+    reg_18_1024_sync               \
+    noreg_9_2048_sync              \
+    noreg_18_1024_sync             \
+    reg_36_1024_sync               \
+    noreg_36_512_sync_memfile      \
+    reg_36_512_sync_outclken       \
+    reg_18_1024_sync_outclken      \
+    noreg_36_512_sync_allzero      \
+    noreg_1_16384_sync_allzero     \
+    noreg_1_2_sync_allzero         \
+    noreg_32_512_sync_ecc          \
+    noreg_64_512_sync_ecc
 
 # For each config name, extract fields by splitting on underscore.
-# 4-word form:  noreg_36_512_sync        → REGMODE=noreg RDATA_WIDTH=36 RADDR_DEPTH=512 RESETMODE=sync
-# 5-word form:  noreg_36_512_sync_memfile → …same… INIT_MODE=mem_file
-# The token "memfile" maps to INIT_MODE=mem_file (no underscore in the token name).
+# 4-word form:  noreg_36_512_sync             → default params
+# 5-word form:  noreg_36_512_sync_memfile     → INIT_MODE=mem_file
+#               reg_36_512_sync_outclken      → OUTPUT_CLK_EN=1
+# 6-word form:  reg_36_512_sync_memfile_outclken → both overrides
 define RUN_CONFIG
 .PHONY: $(1)
 $(1): | $(RESULTS_DIR)
@@ -143,18 +157,228 @@ $(1): | $(RESULTS_DIR)
 		RDATA_WIDTH=$(word 2,$(subst _, ,$(1))) \
 		RADDR_DEPTH=$(word 3,$(subst _, ,$(1))) \
 		RESETMODE=$(word 4,$(subst _, ,$(1))) \
-		$(if $(word 5,$(subst _, ,$(1))),INIT_MODE=$(patsubst memfile,mem_file,$(word 5,$(subst _, ,$(1)))),) \
+		$(if $(filter memfile,$(word 5,$(subst _, ,$(1))) $(word 6,$(subst _, ,$(1)))),INIT_MODE=mem_file,) \
+		$(if $(filter allzero,$(word 5,$(subst _, ,$(1))) $(word 6,$(subst _, ,$(1)))),INIT_MODE=all_zero,) \
+		$(if $(filter outclken,$(word 5,$(subst _, ,$(1))) $(word 6,$(subst _, ,$(1)))),OUTPUT_CLK_EN=1,) \
+		$(if $(filter ecc,$(word 5,$(subst _, ,$(1))) $(word 6,$(subst _, ,$(1)))),ECC_ENABLE=1,) \
 		SIM_BUILD=$(CURDIR)/sim_build/$(1) \
 		2>&1 | tee $(CURDIR)/results/$(1).log; exit $${PIPESTATUS[0]}
 endef
 
 $(foreach cfg,$(ALL_CONFIGS),$(eval $(call RUN_CONFIG,$(cfg))))
 
-.PHONY: all_configs
-all_configs: $(ALL_CONFIGS)
+# ── Special configs — custom INIT_FILE and/or INIT_FILE_FORMAT ───────────────
+# These require a specific fixture file and cannot use the generic RUN_CONFIG macro.
+# TC-06-04: 18-bit × 1024, binary format (addr-as-data in binary notation)
+.PHONY: noreg_18_1024_sync_memfile_bin
+noreg_18_1024_sync_memfile_bin: | $(RESULTS_DIR)
 	@echo ""
 	@echo "================================================================"
-	@echo " All $(words $(ALL_CONFIGS)) configurations completed"
+	@echo " Config: noreg_18_1024_sync_memfile_bin"
+	@echo "================================================================"
+	$(MAKE) sim \
+		REGMODE=noreg RDATA_WIDTH=18 RADDR_DEPTH=1024 RESETMODE=sync \
+		INIT_MODE=mem_file \
+		INIT_FILE=$(CURDIR)/testbench/rom_init_18_1024.bin \
+		INIT_FILE_FORMAT=binary \
+		SIM_BUILD=$(CURDIR)/sim_build/noreg_18_1024_sync_memfile_bin \
+		2>&1 | tee $(CURDIR)/results/noreg_18_1024_sync_memfile_bin.log; exit $${PIPESTATUS[0]}
+
+# TC-06-05: 9-bit × 2048, hex format, alternating 0xAA/0x55 pattern
+.PHONY: noreg_9_2048_sync_memfile_alt
+noreg_9_2048_sync_memfile_alt: | $(RESULTS_DIR)
+	@echo ""
+	@echo "================================================================"
+	@echo " Config: noreg_9_2048_sync_memfile_alt"
+	@echo "================================================================"
+	$(MAKE) sim \
+		REGMODE=noreg RDATA_WIDTH=9 RADDR_DEPTH=2048 RESETMODE=sync \
+		INIT_MODE=mem_file \
+		INIT_FILE=$(CURDIR)/testbench/rom_init_9_2048_alt.hex \
+		SIM_BUILD=$(CURDIR)/sim_build/noreg_9_2048_sync_memfile_alt \
+		2>&1 | tee $(CURDIR)/results/noreg_9_2048_sync_memfile_alt.log; exit $${PIPESTATUS[0]}
+
+# TC-06-08: 4-bit × 4096, binary format (addr%16 pattern)
+.PHONY: noreg_4_4096_sync_memfile_bin
+noreg_4_4096_sync_memfile_bin: | $(RESULTS_DIR)
+	@echo ""
+	@echo "================================================================"
+	@echo " Config: noreg_4_4096_sync_memfile_bin"
+	@echo "================================================================"
+	$(MAKE) sim \
+		REGMODE=noreg RDATA_WIDTH=4 RADDR_DEPTH=4096 RESETMODE=sync \
+		INIT_MODE=mem_file \
+		INIT_FILE=$(CURDIR)/testbench/rom_init_4_4096.bin \
+		INIT_FILE_FORMAT=binary \
+		SIM_BUILD=$(CURDIR)/sim_build/noreg_4_4096_sync_memfile_bin \
+		2>&1 | tee $(CURDIR)/results/noreg_4_4096_sync_memfile_bin.log; exit $${PIPESTATUS[0]}
+
+# ── TG-07 tile-coverage configs — custom INIT_FILE per width/depth ────────────
+.PHONY: noreg_1_16384_sync_memfile
+noreg_1_16384_sync_memfile: | $(RESULTS_DIR)
+	@echo ""
+	@echo "================================================================"
+	@echo " Config: noreg_1_16384_sync_memfile"
+	@echo "================================================================"
+	$(MAKE) sim \
+		REGMODE=noreg RDATA_WIDTH=1 RADDR_DEPTH=16384 RESETMODE=sync \
+		INIT_MODE=mem_file \
+		INIT_FILE=$(CURDIR)/testbench/rom_init_1_16384.hex \
+		SIM_BUILD=$(CURDIR)/sim_build/noreg_1_16384_sync_memfile \
+		2>&1 | tee $(CURDIR)/results/noreg_1_16384_sync_memfile.log; exit $${PIPESTATUS[0]}
+
+.PHONY: noreg_2_8192_sync_memfile
+noreg_2_8192_sync_memfile: | $(RESULTS_DIR)
+	@echo ""
+	@echo "================================================================"
+	@echo " Config: noreg_2_8192_sync_memfile"
+	@echo "================================================================"
+	$(MAKE) sim \
+		REGMODE=noreg RDATA_WIDTH=2 RADDR_DEPTH=8192 RESETMODE=sync \
+		INIT_MODE=mem_file \
+		INIT_FILE=$(CURDIR)/testbench/rom_init_2_8192.hex \
+		SIM_BUILD=$(CURDIR)/sim_build/noreg_2_8192_sync_memfile \
+		2>&1 | tee $(CURDIR)/results/noreg_2_8192_sync_memfile.log; exit $${PIPESTATUS[0]}
+
+.PHONY: noreg_4_4096_sync_memfile
+noreg_4_4096_sync_memfile: | $(RESULTS_DIR)
+	@echo ""
+	@echo "================================================================"
+	@echo " Config: noreg_4_4096_sync_memfile"
+	@echo "================================================================"
+	$(MAKE) sim \
+		REGMODE=noreg RDATA_WIDTH=4 RADDR_DEPTH=4096 RESETMODE=sync \
+		INIT_MODE=mem_file \
+		INIT_FILE=$(CURDIR)/testbench/rom_init_4_4096.hex \
+		SIM_BUILD=$(CURDIR)/sim_build/noreg_4_4096_sync_memfile \
+		2>&1 | tee $(CURDIR)/results/noreg_4_4096_sync_memfile.log; exit $${PIPESTATUS[0]}
+
+.PHONY: noreg_18_1024_sync_memfile
+noreg_18_1024_sync_memfile: | $(RESULTS_DIR)
+	@echo ""
+	@echo "================================================================"
+	@echo " Config: noreg_18_1024_sync_memfile"
+	@echo "================================================================"
+	$(MAKE) sim \
+		REGMODE=noreg RDATA_WIDTH=18 RADDR_DEPTH=1024 RESETMODE=sync \
+		INIT_MODE=mem_file \
+		INIT_FILE=$(CURDIR)/testbench/rom_init_18_1024.hex \
+		SIM_BUILD=$(CURDIR)/sim_build/noreg_18_1024_sync_memfile \
+		2>&1 | tee $(CURDIR)/results/noreg_18_1024_sync_memfile.log; exit $${PIPESTATUS[0]}
+
+.PHONY: noreg_12_512_sync_memfile
+noreg_12_512_sync_memfile: | $(RESULTS_DIR)
+	@echo ""
+	@echo "================================================================"
+	@echo " Config: noreg_12_512_sync_memfile"
+	@echo "================================================================"
+	$(MAKE) sim \
+		REGMODE=noreg RDATA_WIDTH=12 RADDR_DEPTH=512 RESETMODE=sync \
+		INIT_MODE=mem_file \
+		INIT_FILE=$(CURDIR)/testbench/rom_init_12_512.hex \
+		SIM_BUILD=$(CURDIR)/sim_build/noreg_12_512_sync_memfile \
+		2>&1 | tee $(CURDIR)/results/noreg_12_512_sync_memfile.log; exit $${PIPESTATUS[0]}
+
+# ── TG-08 cascade configs — each needs a custom INIT_FILE per width/depth ─────
+.PHONY: noreg_36_1024_sync_memfile
+noreg_36_1024_sync_memfile: | $(RESULTS_DIR)
+	@echo ""
+	@echo "================================================================"
+	@echo " Config: noreg_36_1024_sync_memfile"
+	@echo "================================================================"
+	$(MAKE) sim \
+		REGMODE=noreg RDATA_WIDTH=36 RADDR_DEPTH=1024 RESETMODE=sync \
+		INIT_MODE=mem_file \
+		INIT_FILE=$(CURDIR)/testbench/rom_init_36_1024.hex \
+		SIM_BUILD=$(CURDIR)/sim_build/noreg_36_1024_sync_memfile \
+		2>&1 | tee $(CURDIR)/results/noreg_36_1024_sync_memfile.log; exit $${PIPESTATUS[0]}
+
+.PHONY: noreg_36_2048_sync_memfile
+noreg_36_2048_sync_memfile: | $(RESULTS_DIR)
+	@echo ""
+	@echo "================================================================"
+	@echo " Config: noreg_36_2048_sync_memfile"
+	@echo "================================================================"
+	$(MAKE) sim \
+		REGMODE=noreg RDATA_WIDTH=36 RADDR_DEPTH=2048 RESETMODE=sync \
+		INIT_MODE=mem_file \
+		INIT_FILE=$(CURDIR)/testbench/rom_init_36_2048.hex \
+		SIM_BUILD=$(CURDIR)/sim_build/noreg_36_2048_sync_memfile \
+		2>&1 | tee $(CURDIR)/results/noreg_36_2048_sync_memfile.log; exit $${PIPESTATUS[0]}
+
+.PHONY: noreg_72_512_sync_memfile
+noreg_72_512_sync_memfile: | $(RESULTS_DIR)
+	@echo ""
+	@echo "================================================================"
+	@echo " Config: noreg_72_512_sync_memfile"
+	@echo "================================================================"
+	$(MAKE) sim \
+		REGMODE=noreg RDATA_WIDTH=72 RADDR_DEPTH=512 RESETMODE=sync \
+		INIT_MODE=mem_file \
+		INIT_FILE=$(CURDIR)/testbench/rom_init_72_512.hex \
+		SIM_BUILD=$(CURDIR)/sim_build/noreg_72_512_sync_memfile \
+		2>&1 | tee $(CURDIR)/results/noreg_72_512_sync_memfile.log; exit $${PIPESTATUS[0]}
+
+.PHONY: noreg_144_512_sync_memfile
+noreg_144_512_sync_memfile: | $(RESULTS_DIR)
+	@echo ""
+	@echo "================================================================"
+	@echo " Config: noreg_144_512_sync_memfile"
+	@echo "================================================================"
+	$(MAKE) sim \
+		REGMODE=noreg RDATA_WIDTH=144 RADDR_DEPTH=512 RESETMODE=sync \
+		INIT_MODE=mem_file \
+		INIT_FILE=$(CURDIR)/testbench/rom_init_144_512.hex \
+		SIM_BUILD=$(CURDIR)/sim_build/noreg_144_512_sync_memfile \
+		2>&1 | tee $(CURDIR)/results/noreg_144_512_sync_memfile.log; exit $${PIPESTATUS[0]}
+
+.PHONY: noreg_72_1024_sync_memfile
+noreg_72_1024_sync_memfile: | $(RESULTS_DIR)
+	@echo ""
+	@echo "================================================================"
+	@echo " Config: noreg_72_1024_sync_memfile"
+	@echo "================================================================"
+	$(MAKE) sim \
+		REGMODE=noreg RDATA_WIDTH=72 RADDR_DEPTH=1024 RESETMODE=sync \
+		INIT_MODE=mem_file \
+		INIT_FILE=$(CURDIR)/testbench/rom_init_72_1024.hex \
+		SIM_BUILD=$(CURDIR)/sim_build/noreg_72_1024_sync_memfile \
+		2>&1 | tee $(CURDIR)/results/noreg_72_1024_sync_memfile.log; exit $${PIPESTATUS[0]}
+
+.PHONY: reg_36_2048_sync_memfile
+reg_36_2048_sync_memfile: | $(RESULTS_DIR)
+	@echo ""
+	@echo "================================================================"
+	@echo " Config: reg_36_2048_sync_memfile"
+	@echo "================================================================"
+	$(MAKE) sim \
+		REGMODE=reg RDATA_WIDTH=36 RADDR_DEPTH=2048 RESETMODE=sync \
+		INIT_MODE=mem_file \
+		INIT_FILE=$(CURDIR)/testbench/rom_init_36_2048.hex \
+		SIM_BUILD=$(CURDIR)/sim_build/reg_36_2048_sync_memfile \
+		2>&1 | tee $(CURDIR)/results/reg_36_2048_sync_memfile.log; exit $${PIPESTATUS[0]}
+
+ALL_SPECIAL_CONFIGS := \
+    noreg_18_1024_sync_memfile_bin \
+    noreg_9_2048_sync_memfile_alt  \
+    noreg_4_4096_sync_memfile_bin  \
+    noreg_1_16384_sync_memfile     \
+    noreg_2_8192_sync_memfile      \
+    noreg_4_4096_sync_memfile      \
+    noreg_18_1024_sync_memfile     \
+    noreg_12_512_sync_memfile      \
+    noreg_36_1024_sync_memfile     \
+    noreg_36_2048_sync_memfile     \
+    noreg_72_512_sync_memfile      \
+    noreg_144_512_sync_memfile     \
+    noreg_72_1024_sync_memfile     \
+    reg_36_2048_sync_memfile
+
+.PHONY: all_configs
+all_configs: $(ALL_CONFIGS) $(ALL_SPECIAL_CONFIGS)
+	@echo ""
+	@echo "================================================================"
+	@echo " All $(words $(ALL_CONFIGS) $(ALL_SPECIAL_CONFIGS)) configurations completed"
 	@echo " Logs:     $(RESULTS_DIR)/*.log"
 	@echo " WLF files: $(RESULTS_DIR)/*.wlf"
 	@echo "================================================================"
@@ -166,3 +390,31 @@ all_configs: $(ALL_CONFIGS)
 .PHONY: summary
 summary:
 	@python3 scripts/summarize.py $(if $(MD),$(RESULTS_DIR)/summary.md)
+
+# ── drc ───────────────────────────────────────────────────────────────────────
+# TG-10: DRC and Parameter Validation tests.
+# Exercises the Python model of the lscc_rom plugin DRC rules without a
+# simulator.  Requires pytest:
+#   pip install pytest
+#   make drc
+.PHONY: drc
+drc:
+	@echo ""
+	@echo "================================================================"
+	@echo " TG-10: DRC and Parameter Validation"
+	@echo "================================================================"
+	python3 -m pytest src/test_drc.py -v
+
+# ── TC / TG named targets ─────────────────────────────────────────────────────
+# Run one test case:        make tc-01-01
+# Run all tests in a group: make tg-01
+# TG-10 DRC:                make tg-10  (delegates to pytest via make drc)
+#
+# Each tc-XX-YY target runs only that function in an isolated sim_build directory
+# and writes its log to results/tc-XX-YY.log.
+# Each tg-XX target runs its TCs in sequence and reports a pass/fail summary.
+tc-%:
+	@python3 $(CURDIR)/scripts/run_tc.py tc-$*
+
+tg-%:
+	@python3 $(CURDIR)/scripts/run_tc.py tg-$*

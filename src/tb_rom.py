@@ -5,7 +5,14 @@ Test plan : ROM_LIFCL_testplan.md
 
 Implemented test groups
   TG-01  Basic Read Functionality  (TC-01-01 … TC-01-07)
+  TG-02  Read Clock Enable         (TC-02-01 … TC-02-04)
+  TG-03  Output Clock Enable       (TC-03-01 … TC-03-05)
+  TG-04  Output Register Enable    (TC-04-01 … TC-04-05)
   TG-05  Reset Behavior            (TC-05-01 … TC-05-06)
+  TG-06  Memory Initialization     (TC-06-01 … TC-06-08)
+  TG-07  EBR Tile Config Coverage  (TC-07-01 … TC-07-08)
+  TG-08  EBR Cascading             (TC-08-01 … TC-08-08)
+  TG-09  ECC                       (TC-09-01 … TC-09-07)
 
 Each test uses @cocotb.test(skip=...) to skip itself when the current
 simulation parameters do not match the test's requirements.  Run the full
@@ -28,7 +35,9 @@ REGMODE        =     os.getenv("REGMODE",        "noreg")
 RESETMODE      =     os.getenv("RESETMODE",      "sync")
 OUTPUT_CLK_EN  = int(os.getenv("OUTPUT_CLK_EN",  "0"))
 ECC_ENABLE     = int(os.getenv("ECC_ENABLE",     "0"))
-INIT_MODE      =     os.getenv("INIT_MODE",      "all_one")
+INIT_MODE        =     os.getenv("INIT_MODE",        "all_one")
+INIT_FILE_FORMAT =     os.getenv("INIT_FILE_FORMAT", "hex")
+ECC_ERROR_INJECT = os.getenv("ECC_ERROR_INJECT", "0") == "1"
 
 CLK_NS   = 10    # 100 MHz — matches golden testbench CLK_FREQ=10
 RST_NS   = 100   # 10 cycles at 100 MHz — matches golden RESET_CNT=100
@@ -102,6 +111,24 @@ async def single_read(dut, addr):
     return int(dut.rd_data_o.value)
 
 
+async def single_read_ecc(dut, addr):
+    """Like single_read but also returns (data, one_err_det, two_err_det).
+
+    Prerequisite: rd_en_i, rd_clk_en_i, and rd_out_clk_en_i must already be 1.
+    Caller must be in Active phase; returns in ReadOnly phase.
+    """
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_addr_i.value = addr
+    for _ in range(LAT):
+        await RisingEdge(dut.rd_clk_i)
+    await ReadOnly()
+    return (
+        int(dut.rd_data_o.value),
+        int(dut.one_err_det_o.value),
+        int(dut.two_err_det_o.value),
+    )
+
+
 async def enable_reads(dut):
     """Assert all three read enable signals."""
     dut.rd_en_i.value         = 1
@@ -140,6 +167,29 @@ async def full_sweep(dut, tc):
 
     assert errors == 0, f"{tc} FAILED — {errors} data mismatch(es)"
     dut._log.info(f"{tc} PASSED  ({RADDR_DEPTH} reads, REGMODE={REGMODE})")
+
+
+async def full_sweep_ecc(dut, tc):
+    """Like full_sweep but also verifies one_err_det_o=0 and two_err_det_o=0 at every address.
+
+    Used by TG-09 tests to confirm clean ECC reads produce no false error flags.
+    """
+    errors = 0
+    await enable_reads(dut)
+    hex_w = (RDATA_WIDTH + 3) // 4
+    for addr in range(RADDR_DEPTH):
+        got, one, two = await single_read_ecc(dut, addr)
+        exp = REF[addr]
+        if got != exp:
+            dut._log.error(f"[{tc}] addr={addr}: got=0x{got:0{hex_w}X} exp=0x{exp:0{hex_w}X}")
+            errors += 1
+        if one != 0 or two != 0:
+            dut._log.error(
+                f"[{tc}] addr={addr}: one_err_det_o={one} two_err_det_o={two} (expected both 0)"
+            )
+            errors += 1
+    assert errors == 0, f"{tc} FAILED — {errors} error(s)"
+    dut._log.info(f"{tc} PASSED  ({RADDR_DEPTH} reads, no ECC flags, ECC_ENABLE={ECC_ENABLE})")
 
 
 async def latency_check(dut, tc, n_addrs=16):
@@ -287,188 +337,6 @@ async def tc_01_07_repeated_address(dut):
             f"TC-01-07 FAILED at rep={rep}: got=0x{got:X} exp=0x{exp:X}"
         )
     dut._log.info("TC-01-07 PASSED  (20 repeated reads, stable output)")
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TG-05  Reset Behavior
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@cocotb.test(skip=(REGMODE != "reg" or RESETMODE != "sync" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_05_01_sync_reset_clears_output(dut):
-    """TC-05-01: Sync reset holds rd_data_o=0 while rst_i=1 (reg, sync)."""
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    # Fill the pipeline so rd_data_o holds a known non-zero value (all_one init).
-    dut.rd_addr_i.value = 0
-    for _ in range(LAT + 1):
-        await RisingEdge(dut.rd_clk_i)
-    await ReadOnly()
-    pre_rst = int(dut.rd_data_o.value)
-    assert pre_rst == REF[0], f"TC-05-01 pre-condition failed: got=0x{pre_rst:X}"
-
-    # Assert sync reset and verify output clears every cycle for 5 cycles.
-    dut.rst_i.value = 1
-    for cycle in range(5):
-        await RisingEdge(dut.rd_clk_i)
-        await ReadOnly()
-        got = int(dut.rd_data_o.value)
-        assert got == 0, (
-            f"TC-05-01 FAILED at reset cycle {cycle}: "
-            f"rd_data_o=0x{got:X}, expected 0"
-        )
-
-    dut.rst_i.value = 0
-    dut._log.info("TC-05-01 PASSED  (sync reset cleared output for 5 cycles)")
-
-
-@cocotb.test(skip=(REGMODE != "reg" or RESETMODE != "sync" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_05_02_sync_reset_during_read(dut):
-    """TC-05-02: Sync reset asserted mid-sequence clears output on next clock (reg, sync)."""
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    # Start reading to ensure pipeline is primed.
-    for addr in range(LAT + 2):
-        await RisingEdge(dut.rd_clk_i)
-        dut.rd_addr_i.value = addr
-
-    # Assert reset mid-sequence (between clock edges).
-    dut.rst_i.value = 1
-
-    # On the very next rising edge after rst_i=1, output register must clear.
-    await RisingEdge(dut.rd_clk_i)
-    await ReadOnly()
-    got = int(dut.rd_data_o.value)
-    assert got == 0, (
-        f"TC-05-02 FAILED: rd_data_o=0x{got:X} one cycle after sync reset, expected 0"
-    )
-
-    dut.rst_i.value = 0
-    dut._log.info("TC-05-02 PASSED  (sync reset cleared output within one cycle)")
-
-
-@cocotb.test(skip=(REGMODE != "reg" or RESETMODE != "sync" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_05_03_sync_reset_release_resumes(dut):
-    """TC-05-03: Normal reads resume correctly after sync reset release (reg, sync)."""
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    # Assert reset for 3 cycles then release.
-    dut.rst_i.value = 1
-    for _ in range(3):
-        await RisingEdge(dut.rd_clk_i)
-    dut.rst_i.value = 0
-
-    # Do a normal read and confirm correct data returns.
-    addr = RADDR_DEPTH // 4
-    got  = await single_read(dut, addr)
-    exp  = REF[addr]
-    assert got == exp, (
-        f"TC-05-03 FAILED after reset release: addr={addr} got=0x{got:X} exp=0x{exp:X}"
-    )
-    dut._log.info("TC-05-03 PASSED  (reads resume correctly after sync reset)")
-
-
-@cocotb.test(skip=(REGMODE != "reg" or RESETMODE != "async" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_05_04_async_reset_clears_immediately(dut):
-    """TC-05-04: Async rst_i clears rd_data_o before the next clock edge (reg, async)."""
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    # Read addr=0 — with all_one init REF[0] is non-zero, confirming valid output.
-    dut.rd_addr_i.value = 0
-    for _ in range(LAT + 1):
-        await RisingEdge(dut.rd_clk_i)
-    await ReadOnly()
-    pre_rst = int(dut.rd_data_o.value)
-    assert pre_rst == REF[0], f"TC-05-04 pre-condition failed: got=0x{pre_rst:X}"
-
-    # Assert reset asynchronously — mid-cycle, not at a clock edge.
-    await Timer(CLK_NS // 4, unit="ns")
-    dut.rst_i.value = 1
-    # Allow a small propagation window before sampling.
-    await Timer(1, unit="ns")
-    got = int(dut.rd_data_o.value)
-    assert got == 0, (
-        f"TC-05-04 FAILED: async reset did not clear rd_data_o immediately; "
-        f"got=0x{got:X}"
-    )
-
-    dut.rst_i.value = 0
-    dut._log.info("TC-05-04 PASSED  (async reset cleared rd_data_o without a clock edge)")
-
-
-@cocotb.test(skip=(REGMODE != "reg" or RESETMODE != "async" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_05_05_async_reset_release_resumes(dut):
-    """TC-05-05: Output register operational after async reset release (reg, async)."""
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    # Assert reset asynchronously then release.
-    await Timer(CLK_NS // 4, unit="ns")
-    dut.rst_i.value = 1
-    await Timer(CLK_NS // 2, unit="ns")
-    dut.rst_i.value = 0
-
-    # Sync back to a clock edge, then do a normal read.
-    await RisingEdge(dut.rd_clk_i)
-    addr = RADDR_DEPTH // 4
-    got  = await single_read(dut, addr)
-    exp  = REF[addr]
-    assert got == exp, (
-        f"TC-05-05 FAILED after async reset release: "
-        f"addr={addr} got=0x{got:X} exp=0x{exp:X}"
-    )
-    dut._log.info("TC-05-05 PASSED  (reads operational after async reset release)")
-
-
-@cocotb.test(skip=(REGMODE != "noreg" or RESETMODE != "sync" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_05_06_noreg_reset_has_no_effect(dut):
-    """TC-05-06: noreg/sync — rst_i=1 zeroes rd_data_o; reads resume correctly after de-assertion.
-
-    Despite the noreg label, the LIFCL PDPSC16K output bus is gated by rst_i:
-    synchronous reset forces rd_data_o to 0 on every rising edge while rst_i=1.
-    """
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-    errors = 0
-    hex_w = (RDATA_WIDTH + 3) // 4
-
-    # Phase 1: assert rst_i=1 — expect rd_data_o=0 at every address.
-    dut.rst_i.value = 1
-    for addr in range(min(16, RADDR_DEPTH)):
-        await RisingEdge(dut.rd_clk_i)
-        dut.rd_addr_i.value = addr
-        await ReadOnly()
-        got = int(dut.rd_data_o.value)
-        if got != 0:
-            dut._log.error(
-                f"TC-05-06 rst_i=1 addr={addr}: got=0x{got:0{hex_w}X} expected 0x0"
-            )
-            errors += 1
-
-    # Phase 2: de-assert rst_i in Active phase, then verify reads resume correctly.
-    await RisingEdge(dut.rd_clk_i)
-    dut.rst_i.value = 0
-    for addr in range(min(8, RADDR_DEPTH)):
-        got = await single_read(dut, addr)
-        exp = REF[addr]
-        if got != exp:
-            dut._log.error(
-                f"TC-05-06 post-reset addr={addr}: got=0x{got:0{hex_w}X} exp=0x{exp:0{hex_w}X}"
-            )
-            errors += 1
-
-    assert errors == 0, f"TC-05-06 FAILED — {errors} error(s)"
-    dut._log.info("TC-05-06 PASSED  (rst_i=1 zeroes output; reads resume after de-assertion)")
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TG-02  Read Enable (rd_en_i)
@@ -783,3 +651,725 @@ async def tc_03_05_cascaded_clk_en(dut):
 
     assert errors == 0, f"TC-03-05 FAILED — {errors} mismatch(es) across bank boundary"
     dut._log.info("TC-03-05 PASSED  (no spurious bank data across rd_clk_en_i toggle at boundary)")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TG-04  Output Register Enable (rd_out_clk_en_i / OUTPUT_CLK_EN parameter)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512
+                   or OUTPUT_CLK_EN != 1))
+async def tc_04_01_out_clk_en_zero_freezes_output(dut):
+    """TC-04-01: rd_out_clk_en_i=0 freezes the output register (reg, 36b×512, OUTPUT_CLK_EN=1)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await enable_reads(dut)
+
+    # Prime: read addr=0 with both enables active to establish a known output value.
+    frozen = await single_read(dut, 0)
+    assert frozen == REF[0], f"TC-04-01 pre-condition: got=0x{frozen:X} exp=0x{REF[0]:X}"
+
+    # single_read ends in ReadOnly; return to Active before driving rd_out_clk_en_i.
+    await RisingEdge(dut.rd_clk_i)
+
+    # Freeze the output register — address register still advances (rd_clk_en_i=1).
+    dut.rd_out_clk_en_i.value = 0
+
+    errors = 0
+    hex_w = (RDATA_WIDTH + 3) // 4
+    for addr in range(1, 9):
+        await RisingEdge(dut.rd_clk_i)
+        dut.rd_addr_i.value = addr
+        await ReadOnly()
+        got = int(dut.rd_data_o.value)
+        if got != frozen:
+            dut._log.error(
+                f"TC-04-01 addr={addr}: rd_data_o=0x{got:0{hex_w}X} expected frozen=0x{frozen:0{hex_w}X}"
+            )
+            errors += 1
+
+    assert errors == 0, f"TC-04-01 FAILED — {errors} error(s); output register not frozen"
+    dut._log.info("TC-04-01 PASSED  (rd_data_o held when rd_out_clk_en_i=0)")
+
+
+@cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512
+                   or OUTPUT_CLK_EN != 1))
+async def tc_04_02_out_clk_en_normal_operation(dut):
+    """TC-04-02: rd_out_clk_en_i=1 — normal 2-cycle latency (reg, 36b×512, OUTPUT_CLK_EN=1)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await enable_reads(dut)
+    await latency_check(dut, "TC-04-02")
+
+
+@cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512
+                   or OUTPUT_CLK_EN != 1))
+async def tc_04_03_out_clk_en_toggle_mid_seq(dut):
+    """TC-04-03: rd_out_clk_en_i toggled mid-sequence — rd_data_o updates only when it is 1 (reg, 36b×512, OUTPUT_CLK_EN=1)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await enable_reads(dut)
+
+    hex_w = (RDATA_WIDTH + 3) // 4
+
+    # Phase 1: prime — read addr=0 with rd_out_clk_en_i=1 to load a known output value.
+    frozen = await single_read(dut, 0)
+    assert frozen == REF[0], f"TC-04-03 pre-condition: got=0x{frozen:X} exp=0x{REF[0]:X}"
+
+    # Return to Active phase, then freeze the output register.
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_out_clk_en_i.value = 0
+
+    # Phase 2: 5 cycles with rd_out_clk_en_i=0 — rd_data_o must not change.
+    errors = 0
+    for addr in range(1, 6):
+        await RisingEdge(dut.rd_clk_i)
+        dut.rd_addr_i.value = addr
+        await ReadOnly()
+        got = int(dut.rd_data_o.value)
+        if got != frozen:
+            dut._log.error(
+                f"TC-04-03 frozen phase addr={addr}: got=0x{got:0{hex_w}X} expected 0x{frozen:0{hex_w}X}"
+            )
+            errors += 1
+
+    # Return to Active phase, re-enable the output register.
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_out_clk_en_i.value = 1
+
+    # Phase 3: one clean latency-aware read — normal pipelined delivery must resume.
+    target = 8
+    got = await single_read(dut, target)
+    exp = REF[target]
+    if got != exp:
+        dut._log.error(f"TC-04-03 resume addr={target}: got=0x{got:0{hex_w}X} exp=0x{exp:0{hex_w}X}")
+        errors += 1
+
+    assert errors == 0, f"TC-04-03 FAILED — {errors} error(s)"
+    dut._log.info("TC-04-03 PASSED  (rd_data_o froze during rd_out_clk_en_i=0; resumed after)")
+
+
+@cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512
+                   or OUTPUT_CLK_EN != 0))
+async def tc_04_04_output_clk_en_param_zero_no_effect(dut):
+    """TC-04-04: OUTPUT_CLK_EN=0 — rd_out_clk_en_i port has no effect; data flows normally (reg, 36b×512, OUTPUT_CLK_EN=0)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+
+    # Deliberately leave rd_out_clk_en_i=0.
+    # When OUTPUT_CLK_EN=0 the output-register gate is hardwired open, so this must have no effect.
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 0
+
+    await latency_check(dut, "TC-04-04")
+
+
+@cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 18 or RADDR_DEPTH != 1024
+                   or OUTPUT_CLK_EN != 1))
+async def tc_04_05_both_enables_deasserted(dut):
+    """TC-04-05: rd_clk_en_i=0 and rd_out_clk_en_i=0 simultaneously — rd_data_o holds last value (reg, 18b×1024, OUTPUT_CLK_EN=1)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await enable_reads(dut)
+
+    hex_w = (RDATA_WIDTH + 3) // 4
+
+    # Prime: read addr=0 to establish the value both registers will hold.
+    frozen = await single_read(dut, 0)
+    assert frozen == REF[0], f"TC-04-05 pre-condition: got=0x{frozen:X} exp=0x{REF[0]:X}"
+
+    # Return to Active phase, then de-assert both enables simultaneously.
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_clk_en_i.value     = 0
+    dut.rd_out_clk_en_i.value = 0
+
+    # Drive eight different addresses — neither register should advance.
+    errors = 0
+    for addr in range(1, 9):
+        await RisingEdge(dut.rd_clk_i)
+        dut.rd_addr_i.value = addr
+        await ReadOnly()
+        got = int(dut.rd_data_o.value)
+        if got != frozen:
+            dut._log.error(
+                f"TC-04-05 addr={addr}: rd_data_o=0x{got:0{hex_w}X} expected frozen=0x{frozen:0{hex_w}X}"
+            )
+            errors += 1
+
+    assert errors == 0, f"TC-04-05 FAILED — {errors} error(s); output not frozen"
+    dut._log.info("TC-04-05 PASSED  (rd_data_o held with rd_clk_en_i=0 and rd_out_clk_en_i=0)")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TG-05  Reset Behavior
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@cocotb.test(skip=(REGMODE != "reg" or RESETMODE != "sync" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
+async def tc_05_01_sync_reset_clears_output(dut):
+    """TC-05-01: Sync reset holds rd_data_o=0 while rst_i=1 (reg, sync)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await enable_reads(dut)
+
+    # Fill the pipeline so rd_data_o holds a known non-zero value (all_one init).
+    dut.rd_addr_i.value = 0
+    for _ in range(LAT + 1):
+        await RisingEdge(dut.rd_clk_i)
+    await ReadOnly()
+    pre_rst = int(dut.rd_data_o.value)
+    assert pre_rst == REF[0], f"TC-05-01 pre-condition failed: got=0x{pre_rst:X}"
+
+    # Assert sync reset and verify output clears every cycle for 5 cycles.
+    dut.rst_i.value = 1
+    for cycle in range(5):
+        await RisingEdge(dut.rd_clk_i)
+        await ReadOnly()
+        got = int(dut.rd_data_o.value)
+        assert got == 0, (
+            f"TC-05-01 FAILED at reset cycle {cycle}: "
+            f"rd_data_o=0x{got:X}, expected 0"
+        )
+
+    dut.rst_i.value = 0
+    dut._log.info("TC-05-01 PASSED  (sync reset cleared output for 5 cycles)")
+
+
+@cocotb.test(skip=(REGMODE != "reg" or RESETMODE != "sync" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
+async def tc_05_02_sync_reset_during_read(dut):
+    """TC-05-02: Sync reset asserted mid-sequence clears output on next clock (reg, sync)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await enable_reads(dut)
+
+    # Start reading to ensure pipeline is primed.
+    for addr in range(LAT + 2):
+        await RisingEdge(dut.rd_clk_i)
+        dut.rd_addr_i.value = addr
+
+    # Assert reset mid-sequence (between clock edges).
+    dut.rst_i.value = 1
+
+    # On the very next rising edge after rst_i=1, output register must clear.
+    await RisingEdge(dut.rd_clk_i)
+    await ReadOnly()
+    got = int(dut.rd_data_o.value)
+    assert got == 0, (
+        f"TC-05-02 FAILED: rd_data_o=0x{got:X} one cycle after sync reset, expected 0"
+    )
+
+    dut.rst_i.value = 0
+    dut._log.info("TC-05-02 PASSED  (sync reset cleared output within one cycle)")
+
+
+@cocotb.test(skip=(REGMODE != "reg" or RESETMODE != "sync" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
+async def tc_05_03_sync_reset_release_resumes(dut):
+    """TC-05-03: Normal reads resume correctly after sync reset release (reg, sync)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await enable_reads(dut)
+
+    # Assert reset for 3 cycles then release.
+    dut.rst_i.value = 1
+    for _ in range(3):
+        await RisingEdge(dut.rd_clk_i)
+    dut.rst_i.value = 0
+
+    # Do a normal read and confirm correct data returns.
+    addr = RADDR_DEPTH // 4
+    got  = await single_read(dut, addr)
+    exp  = REF[addr]
+    assert got == exp, (
+        f"TC-05-03 FAILED after reset release: addr={addr} got=0x{got:X} exp=0x{exp:X}"
+    )
+    dut._log.info("TC-05-03 PASSED  (reads resume correctly after sync reset)")
+
+
+@cocotb.test(skip=(REGMODE != "reg" or RESETMODE != "async" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
+async def tc_05_04_async_reset_clears_immediately(dut):
+    """TC-05-04: Async rst_i clears rd_data_o before the next clock edge (reg, async)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await enable_reads(dut)
+
+    # Read addr=0 — with all_one init REF[0] is non-zero, confirming valid output.
+    dut.rd_addr_i.value = 0
+    for _ in range(LAT + 1):
+        await RisingEdge(dut.rd_clk_i)
+    await ReadOnly()
+    pre_rst = int(dut.rd_data_o.value)
+    assert pre_rst == REF[0], f"TC-05-04 pre-condition failed: got=0x{pre_rst:X}"
+
+    # Assert reset asynchronously — mid-cycle, not at a clock edge.
+    await Timer(CLK_NS // 4, unit="ns")
+    dut.rst_i.value = 1
+    # Allow a small propagation window before sampling.
+    await Timer(1, unit="ns")
+    got = int(dut.rd_data_o.value)
+    assert got == 0, (
+        f"TC-05-04 FAILED: async reset did not clear rd_data_o immediately; "
+        f"got=0x{got:X}"
+    )
+
+    dut.rst_i.value = 0
+    dut._log.info("TC-05-04 PASSED  (async reset cleared rd_data_o without a clock edge)")
+
+
+@cocotb.test(skip=(REGMODE != "reg" or RESETMODE != "async" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
+async def tc_05_05_async_reset_release_resumes(dut):
+    """TC-05-05: Output register operational after async reset release (reg, async)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await enable_reads(dut)
+
+    # Assert reset asynchronously then release.
+    await Timer(CLK_NS // 4, unit="ns")
+    dut.rst_i.value = 1
+    await Timer(CLK_NS // 2, unit="ns")
+    dut.rst_i.value = 0
+
+    # Sync back to a clock edge, then do a normal read.
+    await RisingEdge(dut.rd_clk_i)
+    addr = RADDR_DEPTH // 4
+    got  = await single_read(dut, addr)
+    exp  = REF[addr]
+    assert got == exp, (
+        f"TC-05-05 FAILED after async reset release: "
+        f"addr={addr} got=0x{got:X} exp=0x{exp:X}"
+    )
+    dut._log.info("TC-05-05 PASSED  (reads operational after async reset release)")
+
+
+@cocotb.test(skip=(REGMODE != "noreg" or RESETMODE != "sync" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
+async def tc_05_06_noreg_reset_has_no_effect(dut):
+    """TC-05-06: noreg/sync — rst_i=1 zeroes rd_data_o; reads resume correctly after de-assertion.
+
+    Despite the noreg label, the LIFCL PDPSC16K output bus is gated by rst_i:
+    synchronous reset forces rd_data_o to 0 on every rising edge while rst_i=1.
+    """
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await enable_reads(dut)
+    errors = 0
+    hex_w = (RDATA_WIDTH + 3) // 4
+
+    # Phase 1: assert rst_i=1 — expect rd_data_o=0 at every address.
+    dut.rst_i.value = 1
+    for addr in range(min(16, RADDR_DEPTH)):
+        await RisingEdge(dut.rd_clk_i)
+        dut.rd_addr_i.value = addr
+        await ReadOnly()
+        got = int(dut.rd_data_o.value)
+        if got != 0:
+            dut._log.error(
+                f"TC-05-06 rst_i=1 addr={addr}: got=0x{got:0{hex_w}X} expected 0x0"
+            )
+            errors += 1
+
+    # Phase 2: de-assert rst_i in Active phase, then verify reads resume correctly.
+    await RisingEdge(dut.rd_clk_i)
+    dut.rst_i.value = 0
+    for addr in range(min(8, RADDR_DEPTH)):
+        got = await single_read(dut, addr)
+        exp = REF[addr]
+        if got != exp:
+            dut._log.error(
+                f"TC-05-06 post-reset addr={addr}: got=0x{got:0{hex_w}X} exp=0x{exp:0{hex_w}X}"
+            )
+            errors += 1
+
+    assert errors == 0, f"TC-05-06 FAILED — {errors} error(s)"
+    dut._log.info("TC-05-06 PASSED  (rst_i=1 zeroes output; reads resume after de-assertion)")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TG-06  Memory Initialization
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 512 or INIT_MODE != "all_zero"))
+async def tc_06_01_all_zero_init(dut):
+    """TC-06-01: INIT_MODE=all_zero — all 512 locations return 0 (36b×512)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep(dut, "TC-06-01")
+
+
+@cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 512 or INIT_MODE != "all_one"))
+async def tc_06_02_all_one_init(dut):
+    """TC-06-02: INIT_MODE=all_one — all 512 locations return DATA_MASK (36b×512)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep(dut, "TC-06-02")
+
+
+@cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 512
+                   or INIT_MODE != "mem_file" or INIT_FILE_FORMAT != "hex"))
+async def tc_06_03_mem_file_hex(dut):
+    """TC-06-03: INIT_MODE=mem_file, hex format — all 512 locations match INIT_FILE content (36b×512)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep(dut, "TC-06-03")
+
+
+@cocotb.test(skip=(RDATA_WIDTH != 18 or RADDR_DEPTH != 1024
+                   or INIT_MODE != "mem_file" or INIT_FILE_FORMAT != "binary"))
+async def tc_06_04_mem_file_binary(dut):
+    """TC-06-04: INIT_MODE=mem_file, binary format — all 1024 locations match INIT_FILE content (18b×1024)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep(dut, "TC-06-04")
+
+
+@cocotb.test(skip=(RDATA_WIDTH != 9 or RADDR_DEPTH != 2048 or INIT_MODE != "mem_file"))
+async def tc_06_05_mem_file_alternating_pattern(dut):
+    """TC-06-05: INIT_MODE=mem_file, alternating 0xAA/0x55 — verified then swept (9b×2048)."""
+    # Verify the reference model loaded the expected alternating content.
+    EVEN_VAL = 0x0AA & DATA_MASK
+    ODD_VAL  = 0x055 & DATA_MASK
+    for i in range(RADDR_DEPTH):
+        exp = EVEN_VAL if i % 2 == 0 else ODD_VAL
+        assert REF[i] == exp, (
+            f"TC-06-05 pre-condition: INIT_FILE does not encode alternating pattern at addr={i}: "
+            f"REF[{i}]={REF[i]:#x} expected {exp:#x}"
+        )
+
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep(dut, "TC-06-05")
+
+
+@cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 512
+                   or INIT_MODE != "mem_file" or INIT_FILE_FORMAT != "hex"))
+async def tc_06_06_mem_file_addr_as_data(dut):
+    """TC-06-06: INIT_MODE=mem_file, addr-as-data — mem[i]=i verified for all 512 entries (36b×512)."""
+    # Confirm the fixture encodes address-as-data before exercising the hardware.
+    for i in range(RADDR_DEPTH):
+        assert REF[i] == i, (
+            f"TC-06-06 pre-condition: INIT_FILE is not addr-as-data at addr={i}: "
+            f"REF[{i}]={REF[i]} expected {i}"
+        )
+
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep(dut, "TC-06-06")
+
+
+@cocotb.test(skip=(RDATA_WIDTH != 1 or RADDR_DEPTH != 16384 or INIT_MODE != "all_zero"))
+async def tc_06_07_all_zero_narrow(dut):
+    """TC-06-07: INIT_MODE=all_zero, 1b×16384 — all 16384 locations return 0."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep(dut, "TC-06-07")
+
+
+@cocotb.test(skip=(RDATA_WIDTH != 4 or RADDR_DEPTH != 4096
+                   or INIT_MODE != "mem_file" or INIT_FILE_FORMAT != "binary"))
+async def tc_06_08_mem_file_binary_narrow(dut):
+    """TC-06-08: INIT_MODE=mem_file, binary format, 4b×4096 — all locations match INIT_FILE content."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep(dut, "TC-06-08")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TG-07  LIFCL EBR Tile Configuration Coverage
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@cocotb.test(skip=(RDATA_WIDTH != 1 or RADDR_DEPTH != 2 or INIT_MODE != "all_zero"))
+async def tc_07_01_minimum_config(dut):
+    """TC-07-01: Minimum config — 1b×2, all_zero; verifies correct tile selection at smallest dimensions."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep(dut, "TC-07-01")
+
+
+@cocotb.test(skip=(RDATA_WIDTH != 1 or RADDR_DEPTH != 16384 or INIT_MODE != "mem_file"))
+async def tc_07_02_1bit_max_depth(dut):
+    """TC-07-02: 1b×16384 — full depth sweep at maximum single-tile depth."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep(dut, "TC-07-02")
+
+
+@cocotb.test(skip=(RDATA_WIDTH != 2 or RADDR_DEPTH != 8192 or INIT_MODE != "mem_file"))
+async def tc_07_03_2bit_8192(dut):
+    """TC-07-03: 2b×8192 — full depth sweep."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep(dut, "TC-07-03")
+
+
+@cocotb.test(skip=(RDATA_WIDTH != 4 or RADDR_DEPTH != 4096 or INIT_MODE != "mem_file"))
+async def tc_07_04_4bit_4096(dut):
+    """TC-07-04: 4b×4096 — full depth sweep."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep(dut, "TC-07-04")
+
+
+@cocotb.test(skip=(RDATA_WIDTH != 9 or RADDR_DEPTH != 2048 or INIT_MODE != "mem_file"))
+async def tc_07_05_9bit_2048_parity(dut):
+    """TC-07-05: 9b×2048 (parity width) — full depth sweep."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep(dut, "TC-07-05")
+
+
+@cocotb.test(skip=(RDATA_WIDTH != 18 or RADDR_DEPTH != 1024 or INIT_MODE != "mem_file"))
+async def tc_07_06_18bit_1024_parity(dut):
+    """TC-07-06: 18b×1024 (parity width) — full depth sweep."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep(dut, "TC-07-06")
+
+
+@cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 512 or INIT_MODE != "mem_file"))
+async def tc_07_07_36bit_512_default(dut):
+    """TC-07-07: 36b×512 (default tile) — full depth sweep."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep(dut, "TC-07-07")
+
+
+@cocotb.test(skip=(RDATA_WIDTH != 12 or RADDR_DEPTH != 512 or INIT_MODE != "mem_file"))
+async def tc_07_08_non_aligned_width(dut):
+    """TC-07-08: 12b×512 (non-aligned width) — IP selects optimal tile; full sweep passes."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep(dut, "TC-07-08")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TG-08  EBR Cascading
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 1024 or INIT_MODE != "mem_file"))
+async def tc_08_01_addr_cascade_x2(dut):
+    """TC-08-01: Address cascade ×2 — all 1024 locations correct; bank boundary transparent (36b×1024)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep(dut, "TC-08-01")
+
+
+@cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 2048 or INIT_MODE != "mem_file"))
+async def tc_08_02_addr_cascade_x4(dut):
+    """TC-08-02: Address cascade ×4 — all 2048 locations correct (36b×2048)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep(dut, "TC-08-02")
+
+
+@cocotb.test(skip=(RDATA_WIDTH != 72 or RADDR_DEPTH != 512 or INIT_MODE != "mem_file"))
+async def tc_08_03_data_cascade_x2(dut):
+    """TC-08-03: Data cascade ×2 — all 72-bit words correct across both tiles (72b×512)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep(dut, "TC-08-03")
+
+
+@cocotb.test(skip=(RDATA_WIDTH != 144 or RADDR_DEPTH != 512 or INIT_MODE != "mem_file"))
+async def tc_08_04_data_cascade_x4(dut):
+    """TC-08-04: Data cascade ×4 — all 144-bit words correct across four tiles (144b×512)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep(dut, "TC-08-04")
+
+
+@cocotb.test(skip=(RDATA_WIDTH != 72 or RADDR_DEPTH != 1024 or INIT_MODE != "mem_file"))
+async def tc_08_05_both_cascades(dut):
+    """TC-08-05: Addr×2 + Data×2 cascades — all 1024×72-bit locations correct (72b×1024)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep(dut, "TC-08-05")
+
+
+@cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 1024 or INIT_MODE != "mem_file"))
+async def tc_08_06_bank_boundary_read(dut):
+    """TC-08-06: Bank boundary — addr=511 (last in bank 0) and addr=512 (first in bank 1) each return correct data (36b×1024)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await enable_reads(dut)
+
+    hex_w = (RDATA_WIDTH + 3) // 4
+
+    # Confirm fixture provides distinct values across the boundary.
+    assert REF[511] != REF[512], (
+        f"TC-08-06 pre-condition: REF[511]=REF[512]={REF[511]:#x}; "
+        "fixture must provide distinct data across the bank boundary"
+    )
+
+    errors = 0
+    # single_read() handles the ReadOnly→Active transition internally.
+    got_511 = await single_read(dut, 511)
+    if got_511 != REF[511]:
+        dut._log.error(f"TC-08-06 addr=511: got=0x{got_511:0{hex_w}X} exp=0x{REF[511]:0{hex_w}X}")
+        errors += 1
+
+    got_512 = await single_read(dut, 512)
+    if got_512 != REF[512]:
+        dut._log.error(f"TC-08-06 addr=512: got=0x{got_512:0{hex_w}X} exp=0x{REF[512]:0{hex_w}X}")
+        errors += 1
+
+    assert errors == 0, f"TC-08-06 FAILED — {errors} error(s) at bank boundary"
+    dut._log.info("TC-08-06 PASSED  (addr=511 and addr=512 each returned correct distinct data)")
+
+
+@cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 1024 or INIT_MODE != "mem_file"))
+async def tc_08_07_addr_cascade_clk_en_toggle(dut):
+    """TC-08-07: clk_en toggle across bank boundary — v2.5.0: no spurious data from wrong bank (36b×1024)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await enable_reads(dut)
+
+    hex_w = (RDATA_WIDTH + 3) // 4
+    errors = 0
+
+    # Phase 1: prime the pipeline at addr=511 (last address of bank 0).
+    frozen = await single_read(dut, 511)
+    assert frozen == REF[511], f"TC-08-07 pre-condition: got=0x{frozen:X} exp=0x{REF[511]:X}"
+
+    # single_read ends in ReadOnly; return to Active, then de-assert rd_clk_en_i.
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_clk_en_i.value = 0
+
+    # Phase 2: drive addresses that cross into bank 1 while rd_clk_en_i=0.
+    # Output must remain frozen; v2.5.0 bug would have updated with stale bank data.
+    for addr in [512, 513, 514]:
+        await RisingEdge(dut.rd_clk_i)
+        dut.rd_addr_i.value = addr
+        await ReadOnly()
+        got = int(dut.rd_data_o.value)
+        if got != frozen:
+            dut._log.error(
+                f"TC-08-07 frozen phase addr={addr}: got=0x{got:0{hex_w}X} "
+                f"expected frozen=0x{frozen:0{hex_w}X}"
+            )
+            errors += 1
+
+    # Phase 3: re-assert rd_clk_en_i and do a clean read into bank 1.
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_clk_en_i.value = 1
+
+    got_515 = await single_read(dut, 515)
+    if got_515 != REF[515]:
+        dut._log.error(
+            f"TC-08-07 resume addr=515: got=0x{got_515:0{hex_w}X} exp=0x{REF[515]:0{hex_w}X}"
+        )
+        errors += 1
+
+    assert errors == 0, f"TC-08-07 FAILED — {errors} error(s)"
+    dut._log.info("TC-08-07 PASSED  (rd_data_o held across bank boundary; clean resume into bank 1)")
+
+
+@cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 2048
+                   or INIT_MODE != "mem_file" or REGMODE != "reg"))
+async def tc_08_08_addr_cascade_reg_mode(dut):
+    """TC-08-08: Address cascade ×4, REGMODE=reg — LAT=2 verified across all four banks (36b×2048)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep(dut, "TC-08-08")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TG-09  ECC
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@cocotb.test(skip=(ECC_ENABLE != 0 or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
+async def tc_09_01_ecc_disabled_outputs_zero(dut):
+    """TC-09-01: ECC_ENABLE=0 — one_err_det_o and two_err_det_o are 0 at all times (36b×512)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await enable_reads(dut)
+
+    errors = 0
+    for addr in range(min(16, RADDR_DEPTH)):
+        await RisingEdge(dut.rd_clk_i)
+        dut.rd_addr_i.value = addr
+        for _ in range(LAT):
+            await RisingEdge(dut.rd_clk_i)
+        await ReadOnly()
+        one = int(dut.one_err_det_o.value)
+        two = int(dut.two_err_det_o.value)
+        if one != 0 or two != 0:
+            dut._log.error(
+                f"TC-09-01 addr={addr}: one_err_det_o={one} two_err_det_o={two} (expected both 0)"
+            )
+            errors += 1
+
+    assert errors == 0, f"TC-09-01 FAILED — {errors} spurious ECC flag(s) with ECC_ENABLE=0"
+    dut._log.info("TC-09-01 PASSED  (one_err_det_o=two_err_det_o=0 for all reads, ECC_ENABLE=0)")
+
+
+@cocotb.test(skip=(ECC_ENABLE != 1 or RDATA_WIDTH != 32 or RADDR_DEPTH != 512))
+async def tc_09_02_ecc_enabled_clean_data(dut):
+    """TC-09-02: ECC_ENABLE=1, clean init data — rd_data_o correct; no error flags asserted (32b×512)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep_ecc(dut, "TC-09-02")
+
+
+@cocotb.test(skip=(ECC_ENABLE != 1 or RDATA_WIDTH != 32))
+async def tc_09_03_ecc_minimum_width(dut):
+    """TC-09-03: ECC_ENABLE=1, RDATA_WIDTH=32 (minimum ECC width) — full sweep, no false error flags."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep_ecc(dut, "TC-09-03")
+
+
+@cocotb.test(skip=(ECC_ENABLE != 1 or RDATA_WIDTH != 64 or RADDR_DEPTH != 512))
+async def tc_09_04_ecc_maximum_width(dut):
+    """TC-09-04: ECC_ENABLE=1, RDATA_WIDTH=64 (maximum ECC width) — full sweep, no false error flags (64b×512)."""
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut)
+    await full_sweep_ecc(dut, "TC-09-04")
+
+
+@cocotb.test(skip=(ECC_ENABLE != 1 or RDATA_WIDTH != 32 or RADDR_DEPTH != 512
+                   or not ECC_ERROR_INJECT))
+async def tc_09_05_sec_single_bit_error(dut):
+    """TC-09-05: SEC — one_err_det_o=1, two_err_det_o=0, rd_data_o carries corrected value.
+
+    Requires ECC_ERROR_INJECT=1 in the environment AND a pre-corrupted INIT_FILE
+    whose codeword at address 0 has exactly one bit flipped relative to the
+    correctly SECDED-encoded value.  The LIFCL EBR does not expose an error-
+    injection port; corruption must be baked into the ROM at initialisation time
+    by computing the ECC polynomial externally and flipping one parity or data bit.
+
+    Set ECC_ERROR_INJECT=1 to un-skip this test once the infrastructure is ready.
+    """
+    raise NotImplementedError(
+        "TC-09-05: error injection infrastructure not yet implemented. "
+        "Provide a pre-corrupted INIT_FILE and set ECC_ERROR_INJECT=1."
+    )
+
+
+@cocotb.test(skip=(ECC_ENABLE != 1 or RDATA_WIDTH != 32 or RADDR_DEPTH != 512
+                   or not ECC_ERROR_INJECT))
+async def tc_09_06_ded_double_bit_error(dut):
+    """TC-09-06: DED — two_err_det_o=1, one_err_det_o=0.
+
+    Same infrastructure requirement as TC-09-05: the INIT_FILE codeword at the
+    target address must have exactly two bits flipped.  SECDED cannot correct a
+    double-bit error, so rd_data_o is undefined; only the flag output is checked.
+
+    Set ECC_ERROR_INJECT=1 to un-skip once the pre-corrupted fixture is in place.
+    """
+    raise NotImplementedError(
+        "TC-09-06: error injection infrastructure not yet implemented. "
+        "Provide a pre-corrupted INIT_FILE and set ECC_ERROR_INJECT=1."
+    )
+
+
+@cocotb.test(skip=(ECC_ENABLE != 1 or RDATA_WIDTH != 32 or RADDR_DEPTH != 512
+                   or not ECC_ERROR_INJECT))
+async def tc_09_07_ecc_error_recovery(dut):
+    """TC-09-07: ECC recovery — after a SEC event, error flags deassert on subsequent clean reads.
+
+    Requires the same pre-corrupted INIT_FILE as TC-09-05 (single-bit error at
+    addr=0).  The test reads addr=0 (SEC fires), then reads several clean
+    addresses (addr=1…8) and verifies one_err_det_o and two_err_det_o are both 0.
+
+    Set ECC_ERROR_INJECT=1 to un-skip once the pre-corrupted fixture is in place.
+    """
+    raise NotImplementedError(
+        "TC-09-07: error injection infrastructure not yet implemented. "
+        "Provide a pre-corrupted INIT_FILE and set ECC_ERROR_INJECT=1."
+    )
+
