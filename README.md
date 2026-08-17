@@ -274,7 +274,6 @@ endtask
 * **Enables**: `E` = `rd_en_i`, `C` = `rd_clk_en_i`, `O` = `rd_out_clk_en_i`.
 * **Latched Addr**: The address currently emerging at the output stage given the configuration's pipeline latency (`LAT=1` for `noreg`, `LAT=2` for `reg`).
 
-
 ---
 
 ## Test Execution
