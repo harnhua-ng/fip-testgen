@@ -39,7 +39,7 @@ function Get-TcConfig {
 
     $configs = @{
         # ── TG-01  Basic Read ────────────────────────────────────────────────────
-        "01-01" = @{ regmode="noreg"; rdata=36; rdepth=512;  rst="sync";  out_clk=0; ecc=0; init_mode="mem_file"; init_file=$default_init_hex; init_fmt="hex" }
+        "01-01" = @{ regmode="noreg"; rdata=36; rdepth=512;  rst="sync";  out_clk=0; ecc=0; init_mode="mem_file"; init_file=$default_init_hex; init_fmt="hex"; family="common" }
         "01-02" = @{ regmode="reg";   rdata=36; rdepth=512;  rst="sync";  out_clk=0; ecc=0; init_mode="all_one";  init_file="none";              init_fmt="hex" }
         "01-03" = @{ regmode="noreg"; rdata=36; rdepth=512;  rst="sync";  out_clk=0; ecc=0; init_mode="all_one";  init_file="none";              init_fmt="hex" }
         "01-04" = @{ regmode="reg";   rdata=36; rdepth=512;  rst="sync";  out_clk=0; ecc=0; init_mode="all_one";  init_file="none";              init_fmt="hex" }
@@ -120,7 +120,7 @@ function Get-TcConfig {
         return $configs[$clean_key]
     }
     # Default fallback
-    return @{ regmode="noreg"; rdata=36; rdepth=512; rst="sync"; out_clk=0; ecc=0; init_mode="all_one"; init_file="none"; init_fmt="hex" }
+    return @{ regmode="noreg"; rdata=36; rdepth=512; rst="sync"; out_clk=0; ecc=0; init_mode="all_one"; init_file="none"; init_fmt="hex"; family="lifcl" }
 }
 
 # 3. Determine Testcases to Run
@@ -186,11 +186,12 @@ foreach ($test in $tc_list) {
     $wlf_file   = "$repo_root/results/tc-$test.wlf"
     $log_file   = "$repo_root/results/tc-$test.log"
 
+    $family_val = if ($cfg.family) { $cfg.family } else { "LIFCL" }
     $sim_args = @(
         "-work", "sim_build/work",
         "-L", "lifcl",
         "-L", "pmi_work",
-        "-GFAMILY=common",
+        "-GFAMILY=$family_val",
         "-GRDATA_WIDTH=$($cfg.rdata)",
         "-GRADDR_DEPTH=$($cfg.rdepth)",
         "-GREGMODE=$($cfg.regmode)",

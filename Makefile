@@ -30,11 +30,16 @@ endif
 -include env.mk
 -include local.mk
 
+COCOTB_CONFIG ?= $(shell which cocotb-config 2>/dev/null || ( [ -x $(CURDIR)/.venv/bin/cocotb-config ] && echo $(CURDIR)/.venv/bin/cocotb-config ) || ( [ -x $(CURDIR)/.venv/Scripts/cocotb-config.exe ] && echo $(CURDIR)/.venv/Scripts/cocotb-config.exe ) || echo cocotb-config)
+
 ifeq ($(DETECTED_OS),Windows)
     RADIANT_ROOT        ?= C:/lscc/radiant/2026.1
     FOUNDRY             ?= $(RADIANT_ROOT)/ispfpga
     LM_LICENSE_FILE     ?= $(RADIANT_ROOT)/license/license.dat
     SALT_LICENSE_SERVER ?= $(RADIANT_ROOT)/license/license.dat
+    ifneq ($(wildcard $(CURDIR)/.venv/Scripts),)
+        export PATH := $(CURDIR)/.venv/Scripts:$(PATH)
+    endif
     # Prepend QuestaSim and Radiant tools to PATH if not already in PATH
     ifeq ($(findstring questasim,$(PATH)),)
         export PATH := $(RADIANT_ROOT)/questasim/win64:$(RADIANT_ROOT)/bin/nt64:$(PATH)
@@ -44,7 +49,9 @@ else
     FOUNDRY             ?= $(RADIANT_ROOT)/ispfpga
     LM_LICENSE_FILE     ?= 1850@ldc-virtlic02
     SALT_LICENSE_SERVER ?= 1717@lrd-virtlic-rh8-01:1717@lrd-virtlic-ha-01a:1717@lrd-virtlic-ha-01b
-    # Prepend QuestaSim and Radiant tools to PATH if not already in PATH
+    ifneq ($(wildcard $(CURDIR)/.venv/bin),)
+        export PATH := $(CURDIR)/.venv/bin:$(PATH)
+    endif
     ifeq ($(findstring questasim,$(PATH)),)
         export PATH := $(RADIANT_ROOT)/questasim/linux_x86_64:$(RADIANT_ROOT)/bin/lin64:$(PATH)
     endif
@@ -82,7 +89,7 @@ INIT_MODE        ?= all_one
 INIT_FILE        ?= $(CURDIR)/testbench/rom_init.hex
 INIT_FILE_FORMAT ?= hex
 DEVICE_FAMILY    ?= lifcl
-FAMILY          ?= common
+FAMILY          ?= LIFCL
 export RDATA_WIDTH RADDR_DEPTH REGMODE RESETMODE OUTPUT_CLK_EN ECC_ENABLE INIT_MODE INIT_FILE INIT_FILE_FORMAT DEVICE_FAMILY FAMILY
 
 # Optional: run a single test case
@@ -123,13 +130,13 @@ SIM_ARGS    += -do "log -r /*; run -all; quit"
 # RHEL8 ships libpython3.x.so.1.0 but not the unversioned .so symlink.
 # Setting LD_LIBRARY_PATH at make-time propagates to vsim's subprocess.
 ifneq ($(DETECTED_OS),Windows)
-_PYTHON_LIB_DIR := $(shell dirname $$(cocotb-config --libpython 2>/dev/null) 2>/dev/null)
+_PYTHON_LIB_DIR := $(shell dirname $$($(COCOTB_CONFIG) --libpython 2>/dev/null) 2>/dev/null)
 ifneq ($(_PYTHON_LIB_DIR),)
 LD_LIBRARY_PATH := $(_PYTHON_LIB_DIR)$(if $(LD_LIBRARY_PATH),:$(LD_LIBRARY_PATH))
 export LD_LIBRARY_PATH
 endif
-export LIBPYTHON_LOC    := $(shell cocotb-config --libpython 2>/dev/null)
-export PYGPI_PYTHON_BIN := $(shell which python3 2>/dev/null)
+export LIBPYTHON_LOC    := $(shell $(COCOTB_CONFIG) --libpython 2>/dev/null)
+export PYGPI_PYTHON_BIN := $(shell $(COCOTB_CONFIG) --python-bin 2>/dev/null || which python3 2>/dev/null)
 endif
 
 # vlog compile flags
@@ -176,7 +183,7 @@ sim: results_dir
 else
 # ── CoCoTB simulation flow ────────────────────────────────────────────────────
 # Pull in cocotb's Questa Makefile rules (provides sim, compile, clean)
-include $(shell cocotb-config --makefiles)/Makefile.sim
+include $(shell $(COCOTB_CONFIG) --makefiles)/Makefile.sim
 sim: results_dir
 endif
 

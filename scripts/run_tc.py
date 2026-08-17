@@ -22,6 +22,12 @@ from dataclasses import dataclass
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Ensure local .venv is in PATH if present (prepend so it takes precedence)
+for _vbin in [os.path.join(REPO_ROOT, ".venv", "bin"), os.path.join(REPO_ROOT, ".venv", "Scripts")]:
+    if os.path.isdir(_vbin):
+        os.environ["PATH"] = _vbin + os.pathsep + os.environ.get("PATH", "")
+        break
+
 
 def fixture(name):
     """Return the absolute path to a testbench fixture file."""
@@ -40,6 +46,7 @@ class TC:
     init_mode: str      = "all_one"
     init_file: str      = None        # None → Makefile default (rom_init.hex)
     init_file_format: str = "hex"
+    family: str         = "LIFCL"
     note: str           = ""          # non-empty for always-skipped tests
 
 
@@ -49,7 +56,7 @@ TC_MAP = {
     # ── TG-01  Basic Read ────────────────────────────────────────────────────
     "01-01": TC("tc_01_01_sequential_read_noreg",
                 regmode="noreg", rdata_width=36, raddr_depth=512,
-                init_mode="mem_file"),
+                init_mode="mem_file", family="common"),
     "01-02": TC("tc_01_02_sequential_read_reg",
                 regmode="reg", rdata_width=36, raddr_depth=512),
     "01-03": TC("tc_01_03_full_sweep_noreg",
@@ -253,6 +260,7 @@ def run_sim(tc_id, tc):
     cmd = [
         "make", "-C", REPO_ROOT, "sim",
         "FLOW="            + flow,
+        "FAMILY="          + tc.family,
         "REGMODE="         + tc.regmode,
         "RDATA_WIDTH="     + str(tc.rdata_width),
         "RADDR_DEPTH="     + str(tc.raddr_depth),
@@ -416,32 +424,6 @@ def _print_group_summary(tg_id, tc_ids, failures):
         print(f"  TG-{tg_id}: {len(failures)} FAILED — {', '.join('TC-' + f for f in failures)}")
     else:
         print(f"  TG-{tg_id}: all {n} passed")
-    print("=" * res_W)
-    print("  " + "-" * (res_W - 2))
-
-    pass_c = fail_c = skip_c = 0
-    total_ns = total_real = 0.0
-    for tc_id, status, sim_ns, real_s, log_rel, wlf_rel in rows:
-        if   status == "PASS": pass_c += 1
-        elif status == "FAIL": fail_c += 1
-        else:                  skip_c += 1
-        if sim_ns is not None:
-            total_ns   += sim_ns
-            total_real += real_s
-        ns_s    = "{:>13.2f}".format(sim_ns) if sim_ns is not None else "{:>13}".format("--")
-        real_s2 = "{:>13.2f}".format(real_s) if real_s is not None else "{:>13}".format("--")
-        print("  {:<10}  {:>6}  {}  {}".format("TC-" + tc_id, status, ns_s, real_s2))
-
-    n = len(rows)
-    print("  " + "-" * (res_W - 2))
-    print("  TESTS={}  PASS={}  FAIL={}  SKIP={}  {:>13.2f}  {:>13.2f}".format(
-        n, pass_c, fail_c, skip_c, total_ns, total_real))
-    print("=" * res_W)
-    if failures:
-        print("  TG-{}: {} FAILED — {}".format(
-            tg_id, len(failures), ", ".join("TC-" + f for f in failures)))
-    else:
-        print("  TG-{}: all {} passed".format(tg_id, n))
     print("=" * res_W)
 
 
