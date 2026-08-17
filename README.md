@@ -4,9 +4,9 @@ This repository contains a comprehensive verification environment for the Lattic
 
 ---
 
-## 📖 For the RTL Engineer: What is Cocotb & Python Co-Simulation?
+## For the RTL Engineer: What is Cocotb & Python Co-Simulation?
 
-If you are an RTL designer or verification engineer accustomed to SystemVerilog and UVM, **Cocotb** replaces the top-level Verilog verification code with **Python**, while keeping the standard HDL simulator (QuestaSim / ModelSim / VCS / Icarus) running underneath:
+If you are an RTL designer or verification engineer accustomed to SystemVerilog and UVM, **Cocotb** replaces the top-level Verilog verification code with **Python**, while keeping the standard HDL simulator (QuestaSim / ModelSim / VCS / Icarus) underneath:
 
 ```
 ┌────────────────────────────────────────────────────────┐
@@ -25,24 +25,24 @@ If you are an RTL designer or verification engineer accustomed to SystemVerilog 
 └────────────────────────────────────────────────────────┘
 ```
 
-### Python (Cocotb) to SystemVerilog / Verilog Rosetta Stone
+### Python (Cocotb) to SystemVerilog / Verilog Mapping
 
-Cocotb uses Python `async` coroutines that interact with the simulator's stratified event queue via standard VPI callbacks:
+Cocotb uses Python `async` coroutines that interact with the simulator's event queue via standard Verilog Procedural Interface (VPI) callbacks:
 
 | Verification Action | Cocotb (Python) | SystemVerilog / Verilog Equivalent | Simulator Event Region |
 | :--- | :--- | :--- | :--- |
 | **Wait for Clock Edge** | `await RisingEdge(dut.rd_clk_i)` | `@(posedge rd_clk_i);` | Active Region |
 | **Drive Input Signal** | `dut.rd_addr_i.value = 0x10` | `rd_addr_i = 16'h0010;` | Active Region (NBA) |
-| **Time Delay** | `await Timer(100, unit="ns")` | `#100;` | Time Wheel Advance |
+| **Time Delay** | `await Timer(100, unit="ns")` | `#100;` | Time Advance |
 | **Sample Output (Settled)**| `await ReadOnly()`<br>`got = int(dut.rd_data_o.value)` | `#1; got = rd_data_o;`<br>*(or `$strobe` / assertion)* | Postponed / ReadOnly Region |
 | **Concurrent Process** | `cocotb.start_soon(monitor.run())` | `fork begin ... end join_none` | Background Thread |
 | **Assertion / Check** | `assert got == exp, "Mismatch!"` | `assert (rd_data_o === exp) else $error(...);` | Immediate Assertion |
 
 ---
 
-## 🏛️ Verification Architecture: UVM & Transaction-Level Modeling (Approach A)
+## Verification Architecture: UVM & Transaction-Level Modeling (Approach A)
 
-This testbench adheres to industry-standard **UVM (Universal Verification Methodology)** and **Transaction-Level Modeling (TLM)** principles through **Approach A: Passive Background Monitoring**:
+This testbench adheres to industry-standard **UVM (Universal Verification Methodology)** and **Transaction-Level Modeling (TLM)** principles through **Passive Background Monitoring**:
 
 ```
                          ┌─────────────────────────────┐
@@ -52,10 +52,10 @@ This testbench adheres to industry-standard **UVM (Universal Verification Method
                          └──────────────┬──────────────┘
                                         │ (Drives DUT)
                                         ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│                               DUT (lscc_rom)                             │
-│   rd_clk_i ──> [Addr Reg] ──> [EBR Core Matrix] ──> [Output Reg] ──> rd_data_o│
-└───────────────────────────────────────┬──────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│                               DUT (lscc_rom)                                     │
+│   rd_clk_i ──> [Addr Reg] ──> [EBR Core Matrix] ──> [Output Reg] ──> rd_data_o   │
+└───────────────────────────────────────┬──────────────────────────────────────────┘
                                         │ (Passively Observes Pins)
                                         ▼
                          ┌─────────────────────────────┐
@@ -66,21 +66,19 @@ This testbench adheres to industry-standard **UVM (Universal Verification Method
                          └─────────────────────────────┘
 ```
 
-### Why Approach A (Passive Monitor) Over Inline Test Checking (Approach B)?
-
 1. **Strict Decoupling of Stimulus and Analysis (UVM Standard)**:
    * **Test sequences** focus solely on *what scenario to stimulate* (e.g., burst reads, random addresses, toggling clock enables).
-   * The **`PipelineMatrixMonitor`** runs as an independent concurrent observer (`cocotb.start_soon`) that passively observes port signals every clock cycle, exactly like a UVM `uvm_monitor` and `uvm_scoreboard`.
+   * The **`PipelineMatrixMonitor`** runs as an independent concurrent observer (`cocotb.start_soon`) that observes port signals every clock cycle, exactly like a UVM `uvm_monitor` and `uvm_scoreboard`.
 2. **Handles Dynamic Stalls and Pipeline Backpressure**:
-   * Hardware memory operations may stall (e.g., `rd_clk_en_i=0` or `rd_out_clk_en_i=0`). The passive monitor automatically models internal stage holding without requiring complex loop arithmetic in each test.
+   * Hardware memory operations may stall (e.g., `rd_clk_en_i=0` or `rd_out_clk_en_i=0`). The monitor models internal stage holding without requiring complex loop arithmetic in each test.
 3. **Catches Unprompted Glitches and Out-of-Spec Toggles**:
-   * If `rd_data_o` or error flags change when no read was executed, the background monitor catches and reports the protocol violation immediately.
+   * If `rd_data_o` or error flags change when no read was executed, the monitor catches and reports the protocol violation immediately.
 
 ---
 
-## 📊 Cycle-by-Cycle Pipeline Alignment Matrix
+## Cycle-by-Cycle Pipeline Alignment Matrix
 
-Every test run automatically captures and generates an **Alignment Matrix Report** (`results/<tc_name>_matrix.md`), giving RTL engineers instant cycle-by-cycle visibility into the pipeline without needing to open the waveform viewer:
+Every test run generates an **Alignment Matrix Report** (`results/<tc_name>_matrix.md`), giving RTL engineers cycle-by-cycle visibility into the pipeline without needing to open the waveform viewer:
 
 | Time (ns) | Cycle | RST | Enables (E/C/O) | `rd_addr_i` | Latched Addr | `rd_data_o` | Expected (`REF`) | Status |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -94,7 +92,7 @@ Every test run automatically captures and generates an **Alignment Matrix Report
 
 ---
 
-## 🚀 Quick Start & Test Execution
+## Test Execution
 
 ### 1. Prerequisites
 * **Lattice Radiant** (v2024.1 / v2026.1 or newer) with QuestaSim OEM.
@@ -103,33 +101,7 @@ Every test run automatically captures and generates an **Alignment Matrix Report
 
 ---
 
-### 2. Running Simulations via PowerShell (`scripts/run_tc.ps1`)
-
-`scripts/run_tc.ps1` runs tests directly in native Windows PowerShell using QuestaSim:
-
-```powershell
-# Run a specific test case (e.g. TC-01-01)
-.\scripts\run_tc.ps1 -tc "01-01"
-
-# Run an entire test group (e.g. all 7 test cases in TG-01)
-.\scripts\run_tc.ps1 -tg "01"
-
-# Launch QuestaSim GUI with waveforms for interactive debug
-.\scripts\run_tc.ps1 -tc "01-01" -gui
-
-# Custom Lattice Radiant installation path
-.\scripts\run_tc.ps1 -tg "01" -radiant_root "C:\lscc\radiant\2026.1"
-```
-
-#### What `run_tc.ps1` Does Under the Hood:
-1. Sets up environment variables (`LM_LICENSE_FILE`, `SALT_LICENSE_SERVER`, `FOUNDRY`, `PATH`).
-2. Maps Lattice Radiant precompiled simulation libraries (`lifcl` and `pmi_work`).
-3. Compiles `rtl/lscc_rom.v`, `testbench/testgen_top.v`, and `testbench/tb_rom.v` into `sim_build/work`.
-4. Executes `vsim` with `-l results/tc-01-01.log` (plain text log) and `-wlf results/tc-01-01.wlf` (waveform).
-
----
-
-### 3. Running Simulations via Unified `make` (Linux, macOS & Windows Git-Bash / MSYS2)
+### 2. Running Simulations via Unified `make` (Linux, macOS & Windows Git-Bash / MSYS2)
 
 The `Makefile` automatically detects the host operating system (`Windows_NT` vs. `Linux`) and configures appropriate paths and license servers.
 
@@ -163,7 +135,7 @@ The `Makefile` resolves environment settings using a **3-tier precedence hierarc
 
 ---
 
-### 4. Running via Python Test Dispatcher (`scripts/run_tc.py`)
+### 3. Running via Python Test Dispatcher (`scripts/run_tc.py`)
 
 ```bash
 python scripts/run_tc.py TC-01-01          # Single test case
@@ -173,7 +145,7 @@ python scripts/run_tc.py TG-10             # DRC parameter rules (pytest)
 
 ---
 
-## 🗄️ ROM Initialization Files & Fixtures (`testbench/`)
+## ROM Initialization Files & Fixtures (`testbench/`)
 
 When testing `INIT_MODE = "mem_file"`, the DUT and reference model load initialization data from formatted text files located in the `testbench/` directory.
 
@@ -198,7 +170,7 @@ When testing `INIT_MODE = "mem_file"`, the DUT and reference model load initiali
 
 ---
 
-## ⚙️ Simulation Modes: Behavioral (`FAMILY=common`) vs. Primitive (`FAMILY=LIFCL`)
+## Simulation Modes: Behavioral (`FAMILY=common`) vs. Primitive (`FAMILY=LIFCL`)
 
 In `rtl/lscc_rom.v`, the IP supports two distinct simulation paths:
 
@@ -213,7 +185,7 @@ In `rtl/lscc_rom.v`, the IP supports two distinct simulation paths:
 
 ---
 
-## 📁 Artifacts & Output Directory (`results/`)
+## Artifacts & Output Directory (`results/`)
 
 After running tests, all logs, traces, and waveform databases are placed in `results/`:
 
@@ -226,7 +198,7 @@ After running tests, all logs, traces, and waveform databases are placed in `res
 
 ---
 
-## 🧪 Test Plan & Test Group Coverage
+## Test Plan & Test Group Coverage
 
 The test suite is structured into 10 distinct Test Groups (TG-01 through TG-10):
 
@@ -341,7 +313,7 @@ make tg-10    # or: make drc
 
 ---
 
-## 🔍 RTL Debugging Guide: Step-by-Step
+## RTL Debugging Guide: Step-by-Step
 
 When a test fails, use this 3-step triage workflow:
 
