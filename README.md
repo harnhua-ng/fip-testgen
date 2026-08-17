@@ -1,6 +1,6 @@
 # lscc_rom (LIFCL) Verification Suite & Cocotb Testbench
 
-This repository contains a comprehensive verification environment for the Lattice LIFCL ROM IP (`lscc_rom`), built using **[Cocotb](https://www.cocotb.org/)** (Coroutine-based Co-simulation Testbench) and SystemVerilog.
+This repository contains a verification environment for the Lattice LIFCL ROM IP (`lscc_rom`), built using **[Cocotb](https://www.cocotb.org/)** (Coroutine-based Co-simulation Testbench) and SystemVerilog.
 
 ---
 
@@ -40,9 +40,9 @@ Cocotb uses Python `async` coroutines that interact with the simulator's event q
 
 ---
 
-## Verification Architecture: UVM & Transaction-Level Modeling (Approach A)
+## Verification Architecture: UVM & Transaction-Level Modeling
 
-This testbench adheres to industry-standard **UVM (Universal Verification Methodology)** and **Transaction-Level Modeling (TLM)** principles through **Passive Background Monitoring**:
+This testbench adheres to industry-standard **UVM (Universal Verification Methodology)** and **Transaction-Level Modeling (TLM)** principles through background monitoring of cycles and signals:
 
 ```
                          ┌─────────────────────────────┐
@@ -56,7 +56,7 @@ This testbench adheres to industry-standard **UVM (Universal Verification Method
 │                               DUT (lscc_rom)                                     │
 │   rd_clk_i ──> [Addr Reg] ──> [EBR Core Matrix] ──> [Output Reg] ──> rd_data_o   │
 └───────────────────────────────────────┬──────────────────────────────────────────┘
-                                        │ (Passively Observes Pins)
+                                        │ (Observes Pins)
                                         ▼
                          ┌─────────────────────────────┐
                          │    PipelineMatrixMonitor    │  <-- UVM Monitor / Scoreboard
@@ -66,19 +66,20 @@ This testbench adheres to industry-standard **UVM (Universal Verification Method
                          └─────────────────────────────┘
 ```
 
-1. **Strict Decoupling of Stimulus and Analysis (UVM Standard)**:
+1. **Decoupling of Stimulus and Analysis (UVM Standard)**:
    * **Test sequences** focus solely on *what scenario to stimulate* (e.g., burst reads, random addresses, toggling clock enables).
-   * The **`PipelineMatrixMonitor`** runs as an independent concurrent observer (`cocotb.start_soon`) that observes port signals every clock cycle, exactly like a UVM `uvm_monitor` and `uvm_scoreboard`.
+   * The **`PipelineMatrixMonitor`** runs as an independent concurrent observer (`cocotb.start_soon`) that observes port signals every clock cycle, like a UVM `uvm_monitor` and `uvm_scoreboard`.
 2. **Handles Dynamic Stalls and Pipeline Backpressure**:
    * Hardware memory operations may stall (e.g., `rd_clk_en_i=0` or `rd_out_clk_en_i=0`). The monitor models internal stage holding without requiring complex loop arithmetic in each test.
 3. **Catches Unprompted Glitches and Out-of-Spec Toggles**:
-   * If `rd_data_o` or error flags change when no read was executed, the monitor catches and reports the protocol violation immediately.
+   * If `rd_data_o` or error flags change when no read was executed, the monitor catches and reports the protocol violation.
 
 ---
 
-## Cycle-by-Cycle Pipeline Alignment Matrix
+## Cycle-by-Cycle Map
 
-Every test run generates an **Alignment Matrix Report** (`results/<tc_name>_matrix.md`), giving RTL engineers cycle-by-cycle visibility into the pipeline without needing to open the waveform viewer:
+Every test run generates a **Cycle-by-cycle Matrix** (`results/<tc_name>_matrix.md`), giving RTL engineers cycle-by-cycle visibility without needing to open the waveform viewer:  
+(Example for TC-01-01)
 
 | Time (ns) | Cycle | RST | Enables (E/C/O) | `rd_addr_i` | Latched Addr | `rd_data_o` | Expected (`REF`) | Status |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -95,13 +96,13 @@ Every test run generates an **Alignment Matrix Report** (`results/<tc_name>_matr
 ## Test Execution
 
 ### 1. Prerequisites
-* **Lattice Radiant** (v2024.1 / v2026.1 or newer) with QuestaSim OEM.
+* **Lattice Radiant** (v2026.1 or newer) with QuestaSim OEM.
 * **Python 3.8+** with `cocotb` and `pytest`.
 * Environment properly configured (license and tool paths).
 
 ---
 
-### 2. Running Simulations via Unified `make` (Linux, macOS & Windows Git-Bash / MSYS2)
+### 2. Running Simulations via Unified `make` (Linux & Windows)
 
 The `Makefile` automatically detects the host operating system (`Windows_NT` vs. `Linux`) and configures appropriate paths and license servers.
 
@@ -147,7 +148,7 @@ python scripts/run_tc.py TG-10             # DRC parameter rules (pytest)
 
 ## ROM Initialization Files & Fixtures (`testbench/`)
 
-When testing `INIT_MODE = "mem_file"`, the DUT and reference model load initialization data from formatted text files located in the `testbench/` directory.
+When testing `INIT_MODE = "mem_file"`, the DUT and reference model load initialization data from text files in the `testbench/` directory.
 
 ### Initialization Files Mapping
 
@@ -172,7 +173,7 @@ When testing `INIT_MODE = "mem_file"`, the DUT and reference model load initiali
 
 ## Simulation Modes: Behavioral (`FAMILY=common`) vs. Primitive (`FAMILY=LIFCL`)
 
-In `rtl/lscc_rom.v`, the IP supports two distinct simulation paths:
+In `rtl/lscc_rom.v`, the IP supports two simulation paths:
 
 1. **Behavioral Mode (`FAMILY="common"` / `BEHV_MODE`)**:
    * Implements a generic SystemVerilog memory array (`mem[(2**ADDR_WIDTH)-1:0]`).
@@ -187,14 +188,14 @@ In `rtl/lscc_rom.v`, the IP supports two distinct simulation paths:
 
 ## Artifacts & Output Directory (`results/`)
 
-After running tests, all logs, traces, and waveform databases are placed in `results/`:
+After running tests, all logs, traces, and waveforms are placed in `results/`:
 
 | Artifact | File Path | Description |
 | :--- | :--- | :--- |
 | **Simulation Log** | `results/tc-XX-YY.log` | Complete QuestaSim console transcript (plain-text ASCII/UTF-8). |
 | **Waveform File** | `results/tc-XX-YY.wlf` | QuestaSim waveform database (open via `vsim -view results/tc-01-01.wlf`). |
 | **Verilog Trace** | `results/tc-XX-YY_trace.v` | Pure Verilog standalone task recording exact stimulus & checks. |
-| **Pipeline Matrix**| `results/tc-XX-YY_matrix.md`| Markdown table of cycle-by-cycle pipeline transitions. |
+| **Cycle-by-cycle Matrix**| `results/tc-XX-YY_matrix.md`| Markdown table of cycle-by-cycle transitions. |
 
 ---
 
@@ -317,7 +318,7 @@ make tg-10    # or: make drc
 
 When a test fails, use this 3-step triage workflow:
 
-1. **Check the Pipeline Alignment Matrix**:
+1. **Check the Cycle-by-cycle Matrix**:
    Open `results/tc-XX-YY_matrix.md`. Look for rows marked with **`MISMATCH`** to see the exact simulation timestamp, the address in flight, and the expected vs. sampled data.
 2. **Review the Plain-Text Log**:
    Inspect `results/tc-XX-YY.log` for simulator warnings, EBR primitive configuration messages, or assertion failures.
