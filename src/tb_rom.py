@@ -149,7 +149,7 @@ class VerilogTracer:
         cocotb.log.info(f"[{self.tc_name}] Verilog trace written to: {path}")
 
 
-# ── Pipeline Alignment Monitor & Matrix Generator (Approach A: UVM/TLM Pattern)
+# ── Cycle-by-Cycle Monitor & Matrix Generator (UVM/TLM approach)
 class PipelineMatrixMonitor:
     """Cycle-by-cycle passive pipeline monitor and alignment matrix generator.
 
@@ -187,7 +187,10 @@ class PipelineMatrixMonitor:
             self.cycle += 1
             t_ns = get_sim_time(unit="ns")
 
-            # Sample inputs in Active phase
+            # Settle outputs and inputs in ReadOnly phase (after active drivers have run)
+            await ReadOnly()
+
+            # Sample inputs driven during this cycle
             rst_val = self.dut.rst_i.value
             rst = int(rst_val) if rst_val.is_resolvable else -1
 
@@ -202,9 +205,6 @@ class PipelineMatrixMonitor:
 
             addr_val = self.dut.rd_addr_i.value
             addr = int(addr_val) if addr_val.is_resolvable else None
-
-            # Settle outputs in ReadOnly phase
-            await ReadOnly()
 
             data_val = self.dut.rd_data_o.value
             got = int(data_val) if data_val.is_resolvable else None
@@ -258,7 +258,7 @@ class PipelineMatrixMonitor:
         file_path = os.path.join(self.out_dir, f"{self.tc_name.lower()}_matrix.md")
 
         lines = [
-            f"# Pipeline Alignment Matrix — {self.tc_name}",
+            f"# Cycle-by-Cycle Matrix - {self.tc_name}",
             f"",
             f"- **Design Under Test**: `lscc_rom` (LIFCL)",
             f"- **Parameters**: `REGMODE={REGMODE}` (LAT={self.latency}), `RDATA_WIDTH={RDATA_WIDTH}`, `RADDR_DEPTH={RADDR_DEPTH}`, `RESETMODE={RESETMODE}`, `INIT_MODE={INIT_MODE}`",

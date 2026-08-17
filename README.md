@@ -42,14 +42,14 @@ Cocotb uses Python `async` coroutines that interact with the simulator's event q
 
 ## Verification Architecture: UVM & Transaction-Level Modeling
 
-This testbench adheres to industry-standard **UVM (Universal Verification Methodology)** and **Transaction-Level Modeling (TLM)** principles through background monitoring of cycles and signals:
+This testbench uses standard **UVM (Universal Verification Methodology)** and **Transaction-Level Modeling (TLM)** approach to monitor of cycles and signals:
 
 ```
-                         ┌─────────────────────────────┐
-                         │   Cocotb Test (Sequence)    │
-                         │   • Applies Reset           │
-                         │   • Drives Addresses        │
-                         └──────────────┬──────────────┘
+                         ┌────────────────────────────────────────────────┐
+                         │   Cocotb Test (Sequence)                       │
+                         │   • Applies Reset                              │
+                         │   • Drives Control signals, Addresses & Data   │
+                         └──────────────┬─────────────────────────────────┘
                                         │ (Drives DUT)
                                         ▼
 ┌──────────────────────────────────────────────────────────────────────────────────┐
@@ -58,17 +58,17 @@ This testbench adheres to industry-standard **UVM (Universal Verification Method
 └───────────────────────────────────────┬──────────────────────────────────────────┘
                                         │ (Observes Pins)
                                         ▼
-                         ┌─────────────────────────────┐
-                         │    PipelineMatrixMonitor    │  <-- UVM Monitor / Scoreboard
-                         │   • Non-intrusive Observer  │
-                         │   • Cycle-Accurate Pipeline │
-                         │   • Generates Matrix .md    │
-                         └─────────────────────────────┘
+                         ┌───────────────────────────────┐
+                         │    PipelineMatrixMonitor      │  <-- UVM Monitor / Scoreboard
+                         │   • Non-intrusive Observer    │
+                         │   • Cycle-Accurate Pipeline   │
+                         │   • Generates Matrix .md      │
+                         └───────────────────────────────┘
 ```
 
 1. **Decoupling of Stimulus and Analysis (UVM Standard)**:
    * **Test sequences** focus solely on *what scenario to stimulate* (e.g., burst reads, random addresses, toggling clock enables).
-   * The **`PipelineMatrixMonitor`** runs as an independent concurrent observer (`cocotb.start_soon`) that observes port signals every clock cycle, like a UVM `uvm_monitor` and `uvm_scoreboard`.
+   * The **`PipelineMatrixMonitor`** runs as an observer (`cocotb.start_soon`) that monitors port signals every clock cycle, like a UVM `uvm_monitor` and `uvm_scoreboard`.
 2. **Handles Dynamic Stalls and Pipeline Backpressure**:
    * Hardware memory operations may stall (e.g., `rd_clk_en_i=0` or `rd_out_clk_en_i=0`). The monitor models internal stage holding without requiring complex loop arithmetic in each test.
 3. **Catches Unprompted Glitches and Out-of-Spec Toggles**:
@@ -78,18 +78,194 @@ This testbench adheres to industry-standard **UVM (Universal Verification Method
 
 ## Cycle-by-Cycle Map
 
-Every test run generates a **Cycle-by-cycle Matrix** (`results/<tc_name>_matrix.md`), giving RTL engineers cycle-by-cycle visibility without needing to open the waveform viewer:  
+Every test run generates a **Cycle-by-cycle Matrix** (`results/<tc_name>_matrix.md`) as a way to provide cycle-by-cycle traces:  
 (Example for TC-01-01)
+
+### Verilog Trace
+
+// ============================================================================
+// Verilog Stimulus & Check Trace: TC-01-01
+// Auto-generated at runtime from src/tb_rom.py
+// ============================================================================
+task automatic run_tc_01_01_trace;
+
+    // Reset sequence
+    rst_i = 1'b1;
+    rd_en_i = 1'b0;
+    rd_clk_en_i = 1'b0;
+    rd_out_clk_en_i = 1'b0;
+    rd_addr_i = 9'h0;
+    #100;
+    rst_i = 1'b0;
+    @(posedge rd_clk_i);
+
+    // Enable reads
+    rd_en_i = 1'b1;
+    rd_clk_en_i = 1'b1;
+    rd_out_clk_en_i = 1'b1;
+
+    // Prime: fill 1 pipeline stage(s)
+    @(posedge rd_clk_i);
+    rd_addr_i = 9'h0;
+
+    // Steady: drive addr[i] and sample addr[i-1]
+    @(posedge rd_clk_i);
+    rd_addr_i = 9'h1;
+    if (rd_data_o !== 36'h000000000) begin
+        $display("[TC-01-01] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x000000000", 1, 0, rd_data_o);
+        errors++;
+    end
+    @(posedge rd_clk_i);
+    rd_addr_i = 9'h2;
+    if (rd_data_o !== 36'h000000001) begin
+        $display("[TC-01-01] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x000000001", 2, 1, rd_data_o);
+        errors++;
+    end
+    @(posedge rd_clk_i);
+    rd_addr_i = 9'h3;
+    if (rd_data_o !== 36'h000000002) begin
+        $display("[TC-01-01] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x000000002", 3, 2, rd_data_o);
+        errors++;
+    end
+    @(posedge rd_clk_i);
+    rd_addr_i = 9'h4;
+    if (rd_data_o !== 36'h000000003) begin
+        $display("[TC-01-01] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x000000003", 4, 3, rd_data_o);
+        errors++;
+    end
+    @(posedge rd_clk_i);
+    rd_addr_i = 9'h5;
+    if (rd_data_o !== 36'h000000004) begin
+        $display("[TC-01-01] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x000000004", 5, 4, rd_data_o);
+        errors++;
+    end
+    @(posedge rd_clk_i);
+    rd_addr_i = 9'h6;
+    if (rd_data_o !== 36'h000000005) begin
+        $display("[TC-01-01] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x000000005", 6, 5, rd_data_o);
+        errors++;
+    end
+    @(posedge rd_clk_i);
+    rd_addr_i = 9'h7;
+    if (rd_data_o !== 36'h000000006) begin
+        $display("[TC-01-01] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x000000006", 7, 6, rd_data_o);
+        errors++;
+    end
+    @(posedge rd_clk_i);
+    rd_addr_i = 9'h8;
+    if (rd_data_o !== 36'h000000007) begin
+        $display("[TC-01-01] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x000000007", 8, 7, rd_data_o);
+        errors++;
+    end
+    @(posedge rd_clk_i);
+    rd_addr_i = 9'h9;
+    if (rd_data_o !== 36'h000000008) begin
+        $display("[TC-01-01] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x000000008", 9, 8, rd_data_o);
+        errors++;
+    end
+    @(posedge rd_clk_i);
+    rd_addr_i = 9'hA;
+    if (rd_data_o !== 36'h000000009) begin
+        $display("[TC-01-01] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x000000009", 10, 9, rd_data_o);
+        errors++;
+    end
+    @(posedge rd_clk_i);
+    rd_addr_i = 9'hB;
+    if (rd_data_o !== 36'h00000000A) begin
+        $display("[TC-01-01] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x00000000A", 11, 10, rd_data_o);
+        errors++;
+    end
+    @(posedge rd_clk_i);
+    rd_addr_i = 9'hC;
+    if (rd_data_o !== 36'h00000000B) begin
+        $display("[TC-01-01] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x00000000B", 12, 11, rd_data_o);
+        errors++;
+    end
+    @(posedge rd_clk_i);
+    rd_addr_i = 9'hD;
+    if (rd_data_o !== 36'h00000000C) begin
+        $display("[TC-01-01] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x00000000C", 13, 12, rd_data_o);
+        errors++;
+    end
+    @(posedge rd_clk_i);
+    rd_addr_i = 9'hE;
+    if (rd_data_o !== 36'h00000000D) begin
+        $display("[TC-01-01] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x00000000D", 14, 13, rd_data_o);
+        errors++;
+    end
+    @(posedge rd_clk_i);
+    rd_addr_i = 9'hF;
+    if (rd_data_o !== 36'h00000000E) begin
+        $display("[TC-01-01] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x00000000E", 15, 14, rd_data_o);
+        errors++;
+    end
+
+    // Drain: flush last pipeline stages
+    @(posedge rd_clk_i);
+    if (rd_data_o !== 36'h00000000F) begin
+        $display("[TC-01-01] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x00000000F", 16, 15, rd_data_o);
+        errors++;
+    end
+endtask
+
+
+### Python (cocotb)
+@cocotb.test(skip=(REGMODE != "noreg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512
+                   or INIT_MODE != "mem_file"))
+async def tc_01_01_sequential_read_noreg(dut):
+    """TC-01-01: rd_data_o = mem[addr] after exactly 1 clock cycle (noreg, 36bx512).
+
+    Drives 16 sequential addresses in a pipelined pattern.  At each cycle the
+    address presented one cycle earlier must appear at rd_data_o, proving that
+    the pipeline latency is exactly LAT=1.
+    """
+    tracer = VerilogTracer("TC-01-01", enabled=True)
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut, tracer)
+    await enable_reads(dut, tracer)
+    await latency_check(dut, "TC-01-01", n_addrs=16, tracer=tracer)
+    tracer.save()
+
+
+### Cycle-by-Cycle Matrix
+
+- **Design Under Test**: `lscc_rom` (LIFCL)
+- **Parameters**: `REGMODE=noreg` (LAT=1), `RDATA_WIDTH=36`, `RADDR_DEPTH=512`, `RESETMODE=sync`, `INIT_MODE=mem_file`
+- **Total Monitored Cycles**: 27
 
 | Time (ns) | Cycle | RST | Enables (E/C/O) | `rd_addr_i` | Latched Addr | `rd_data_o` | Expected (`REF`) | Status |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| 105.00 | 11 | 0 | E:1 C:1 O:1 | `0x0` | `--` | `0x000000000` | `--` | IDLE/PRIME |
-| 115.00 | 12 | 0 | E:1 C:1 O:1 | `0x1` | `0x0` | `0x000000001` | `0x000000001` | **PASS** |
-| 125.00 | 13 | 0 | E:1 C:1 O:1 | `0x2` | `0x1` | `0x000000002` | `0x000000002` | **PASS** |
-| 135.00 | 14 | 0 | E:1 C:1 O:1 | `0x3` | `0x2` | `0x000000003` | `0x000000003` | **PASS** |
+|    0.00 | 1 | 1 | E:0 C:0 O:0 | 0x0 | -- | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX | -- | RESET |
+|   10.00 | 2 | 1 | E:0 C:0 O:0 | 0x0 | -- | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX | -- | RESET |
+|   20.00 | 3 | 1 | E:0 C:0 O:0 | 0x0 | -- | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX | -- | RESET |
+|   30.00 | 4 | 1 | E:0 C:0 O:0 | 0x0 | -- | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX | -- | RESET |
+|   40.00 | 5 | 1 | E:0 C:0 O:0 | 0x0 | -- | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX | -- | RESET |
+|   50.00 | 6 | 1 | E:0 C:0 O:0 | 0x0 | -- | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX | -- | RESET |
+|   60.00 | 7 | 1 | E:0 C:0 O:0 | 0x0 | -- | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX | -- | RESET |
+|   70.00 | 8 | 1 | E:0 C:0 O:0 | 0x0 | -- | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX | -- | RESET |
+|   80.00 | 9 | 1 | E:0 C:0 O:0 | 0x0 | -- | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX | -- | RESET |
+|   90.00 | 10 | 1 | E:0 C:0 O:0 | 0x0 | -- | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX | -- | RESET |
+|  100.00 | 11 | 0 | E:1 C:1 O:1 | 0x0 | -- | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX | -- | UNKNOWN |
+|  110.00 | 12 | 0 | E:1 C:1 O:1 | 0x0 | 0x0 | 0x000000000 | 0x000000000 | PASS |
+|  120.00 | 13 | 0 | E:1 C:1 O:1 | 0x1 | 0x0 | 0x000000000 | 0x000000000 | PASS |
+|  130.00 | 14 | 0 | E:1 C:1 O:1 | 0x2 | 0x1 | 0x000000001 | 0x000000001 | PASS |
+|  140.00 | 15 | 0 | E:1 C:1 O:1 | 0x3 | 0x2 | 0x000000002 | 0x000000002 | PASS |
+|  150.00 | 16 | 0 | E:1 C:1 O:1 | 0x4 | 0x3 | 0x000000003 | 0x000000003 | PASS |
+|  160.00 | 17 | 0 | E:1 C:1 O:1 | 0x5 | 0x4 | 0x000000004 | 0x000000004 | PASS |
+|  170.00 | 18 | 0 | E:1 C:1 O:1 | 0x6 | 0x5 | 0x000000005 | 0x000000005 | PASS |
+|  180.00 | 19 | 0 | E:1 C:1 O:1 | 0x7 | 0x6 | 0x000000006 | 0x000000006 | PASS |
+|  190.00 | 20 | 0 | E:1 C:1 O:1 | 0x8 | 0x7 | 0x000000007 | 0x000000007 | PASS |
+|  200.00 | 21 | 0 | E:1 C:1 O:1 | 0x9 | 0x8 | 0x000000008 | 0x000000008 | PASS |
+|  210.00 | 22 | 0 | E:1 C:1 O:1 | 0xA | 0x9 | 0x000000009 | 0x000000009 | PASS |
+|  220.00 | 23 | 0 | E:1 C:1 O:1 | 0xB | 0xA | 0x00000000A | 0x00000000A | PASS |
+|  230.00 | 24 | 0 | E:1 C:1 O:1 | 0xC | 0xB | 0x00000000B | 0x00000000B | PASS |
+|  240.00 | 25 | 0 | E:1 C:1 O:1 | 0xD | 0xC | 0x00000000C | 0x00000000C | PASS |
+|  250.00 | 26 | 0 | E:1 C:1 O:1 | 0xE | 0xD | 0x00000000D | 0x00000000D | PASS |
+|  260.00 | 27 | 0 | E:1 C:1 O:1 | 0xF | 0xE | 0x00000000E | 0x00000000E | PASS |
 
 * **Enables**: `E` = `rd_en_i`, `C` = `rd_clk_en_i`, `O` = `rd_out_clk_en_i`.
 * **Latched Addr**: The address currently emerging at the output stage given the configuration's pipeline latency (`LAT=1` for `noreg`, `LAT=2` for `reg`).
+
 
 ---
 
@@ -104,7 +280,7 @@ Every test run generates a **Cycle-by-cycle Matrix** (`results/<tc_name>_matrix.
 
 ### 2. Running Simulations via Unified `make` (Linux & Windows)
 
-The `Makefile` automatically detects the host operating system (`Windows_NT` vs. `Linux`) and configures appropriate paths and license servers.
+The `Makefile` detects the host operating system (`Windows_NT` vs. `Linux`) and configures tool paths and license servers.
 
 ```bash
 make tc-01-01          # Run one specific test case
