@@ -1,20 +1,20 @@
-# sim.f — qrun filelist for lscc_rom CoCoTB testbench
+# sim.f — QuestaSim argument and filelist file for lscc_rom testbench
 #
 # Usage (via run_qsim.sh):
-#   ./run_qsim.sh -m oem_local -b <radiant_build> -f sim.f
+#   ./run_qsim.sh -m oem_local -b <radiant_build> -f scripts/sim.f
 #   REGMODE=reg ./run_qsim.sh ...
 #
-# Direct qrun usage:
-#   qrun -f sim.f -GREGMODE=reg -GRDATA_WIDTH=36 -GRADDR_DEPTH=512 \
+# Direct QuestaSim / qrun usage:
+#   qrun -f scripts/sim.f -GREGMODE=reg -GRDATA_WIDTH=36 -GRADDR_DEPTH=512 \
 #        -pli <cocotb_vpi> -do "run -all; quit"
-
-# ── RTL sources ───────────────────────────────────────────────────────────────
+#
+# ── RTL and Testbench Sources ────────────────────────────────────────────────
 rtl/lscc_rom.v
 testbench/testgen_top.v
 
-# ── Top-level ─────────────────────────────────────────────────────────────────
+# ── Top-level module (for CoCoTB: testgen_top; for standalone Verilog: tb_rom) ─
 -top testgen_top
 
-# ── Simulation run options ────────────────────────────────────────────────────
+# ── Simulation compilation & optimization options ─────────────────────────────
 -sv
 +acc

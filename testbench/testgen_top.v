@@ -3,13 +3,16 @@
 // Provides GSR_INST at the top level (required by LIFCL EBR primitives)
 // and exposes all DUT ports for cocotb to drive.
 module testgen_top #(
+    parameter FAMILY           = "common",
     parameter RDATA_WIDTH      = 36,
     parameter RADDR_DEPTH      = 512,
     parameter REGMODE          = "noreg",
     parameter RESETMODE        = "sync",
-    parameter OUTPUT_CLK_EN   = 0,
+    parameter OUTPUT_CLK_EN    = 0,
     parameter ECC_ENABLE       = 0,
-    parameter INIT_MODE        = "all_one"
+    parameter INIT_MODE        = "all_one",
+    parameter INIT_FILE        = "none",
+    parameter INIT_FILE_FORMAT = "hex"
 ) (
     input  wire                            rd_clk_i,
     input  wire                            rst_i,
@@ -27,13 +30,16 @@ module testgen_top #(
     GSR GSR_INST (.GSR_N(1'b1), .CLK(1'b0));
 
     lscc_rom #(
-        .RDATA_WIDTH   (RDATA_WIDTH),
-        .RADDR_DEPTH   (RADDR_DEPTH),
-        .REGMODE       (REGMODE),
-        .RESETMODE     (RESETMODE),
-        .OUTPUT_CLK_EN (OUTPUT_CLK_EN),
-        .ECC_ENABLE    (ECC_ENABLE),
-        .INIT_MODE     (INIT_MODE)
+        .FAMILY           (FAMILY),
+        .RDATA_WIDTH      (RDATA_WIDTH),
+        .RADDR_DEPTH      (RADDR_DEPTH),
+        .REGMODE          (REGMODE),
+        .RESETMODE        (RESETMODE),
+        .OUTPUT_CLK_EN    (OUTPUT_CLK_EN),
+        .ECC_ENABLE       (ECC_ENABLE),
+        .INIT_MODE        (INIT_MODE),
+        .INIT_FILE        (INIT_FILE),
+        .INIT_FILE_FORMAT (INIT_FILE_FORMAT)
     ) dut (
         .rd_clk_i       (rd_clk_i),
         .rst_i          (rst_i),

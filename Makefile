@@ -3,17 +3,56 @@ SHELL := /bin/bash
 # ==============================================================================
 # CoCoTB Makefile — lscc_rom LIFCL testbench
 #
-# The Radiant environment must be sourced before invoking make:
-#   source ~/setup_radiant.sh ng2026_2.82
+# Unified cross-platform testbench for Windows (Git Bash/MSYS2) and Linux.
+# Environment and license variables are auto-detected by platform and can be
+# overridden via:
+#   1. Environment variables (export LM_LICENSE_FILE=...)
+#   2. Local override file: env.mk (see env.mk.example)
+#   3. Command-line flags (make LM_LICENSE_FILE=...)
 #
 # Usage:
 #   make                          # default: noreg / 36b×512 / sync / all_one
 #   make REGMODE=reg RADDR_DEPTH=512   # override individual parameters
 #   make TESTCASE=tc_01_01_sequential_read_noreg  # single test case
-#   make all_configs              # run all 7 required parameter combinations
+#   make all_configs              # run all required parameter combinations
 #   make noreg_36_512_sync        # run one named configuration directly
 #   make clean                    # remove sim_build/ and results/
 # ==============================================================================
+
+# ── Platform Detection & Environment Defaults ─────────────────────────────────
+ifeq ($(OS),Windows_NT)
+    DETECTED_OS := Windows
+else
+    DETECTED_OS := $(shell uname -s 2>/dev/null || echo Linux)
+endif
+
+# Optional local overrides (git-ignored)
+-include env.mk
+-include local.mk
+
+ifeq ($(DETECTED_OS),Windows)
+    RADIANT_ROOT        ?= C:/lscc/radiant/2026.1
+    FOUNDRY             ?= $(RADIANT_ROOT)/ispfpga
+    LM_LICENSE_FILE     ?= $(RADIANT_ROOT)/license/license.dat
+    SALT_LICENSE_SERVER ?= $(RADIANT_ROOT)/license/license.dat
+    # Prepend QuestaSim and Radiant tools to PATH if not already in PATH
+    ifeq ($(findstring questasim,$(PATH)),)
+        export PATH := $(RADIANT_ROOT)/questasim/win64:$(RADIANT_ROOT)/bin/nt64:$(PATH)
+    endif
+else
+    RADIANT_ROOT        ?= /opt/lscc/radiant/2026.1
+    FOUNDRY             ?= $(RADIANT_ROOT)/ispfpga
+    LM_LICENSE_FILE     ?= 1850@ldc-virtlic02
+    SALT_LICENSE_SERVER ?= 1717@lrd-virtlic-rh8-01:1717@lrd-virtlic-ha-01a:1717@lrd-virtlic-ha-01b
+    # Prepend QuestaSim and Radiant tools to PATH if not already in PATH
+    ifeq ($(findstring questasim,$(PATH)),)
+        export PATH := $(RADIANT_ROOT)/questasim/linux_x86_64:$(RADIANT_ROOT)/bin/lin64:$(PATH)
+    endif
+endif
+
+export FOUNDRY
+export LM_LICENSE_FILE
+export SALT_LICENSE_SERVER
 
 # ── Simulator ─────────────────────────────────────────────────────────────────
 # cocotb drives vlog (compile) + vsim (simulate) — functionally identical to qrun.
@@ -43,7 +82,8 @@ INIT_MODE        ?= all_one
 INIT_FILE        ?= $(CURDIR)/testbench/rom_init.hex
 INIT_FILE_FORMAT ?= hex
 DEVICE_FAMILY    ?= lifcl
-export RDATA_WIDTH RADDR_DEPTH REGMODE RESETMODE OUTPUT_CLK_EN ECC_ENABLE INIT_MODE INIT_FILE INIT_FILE_FORMAT DEVICE_FAMILY
+FAMILY          ?= common
+export RDATA_WIDTH RADDR_DEPTH REGMODE RESETMODE OUTPUT_CLK_EN ECC_ENABLE INIT_MODE INIT_FILE INIT_FILE_FORMAT DEVICE_FAMILY FAMILY
 
 # Optional: run a single test case
 # Example: make TESTCASE=tc_01_01_sequential_read_noreg
@@ -53,6 +93,7 @@ endif
 
 # vsim arguments
 # Verilog parameter generics (-GRDATA_WIDTH=... etc.)
+SIM_ARGS += -GFAMILY=$(FAMILY)
 SIM_ARGS += -GRDATA_WIDTH=$(RDATA_WIDTH)
 SIM_ARGS += -GRADDR_DEPTH=$(RADDR_DEPTH)
 SIM_ARGS += -GREGMODE=$(REGMODE)
@@ -78,31 +119,66 @@ SIM_ARGS    += -wlf $(WLF_FILE)
 # run simulation
 SIM_ARGS    += -do "log -r /*; run -all; quit"
 
-# libpython RPATH fix
+# libpython RPATH fix (Linux only)
 # RHEL8 ships libpython3.x.so.1.0 but not the unversioned .so symlink.
 # Setting LD_LIBRARY_PATH at make-time propagates to vsim's subprocess.
-_PYTHON_LIB_DIR := $(shell dirname $(shell cocotb-config --libpython))
+ifneq ($(DETECTED_OS),Windows)
+_PYTHON_LIB_DIR := $(shell dirname $$(cocotb-config --libpython 2>/dev/null) 2>/dev/null)
+ifneq ($(_PYTHON_LIB_DIR),)
 LD_LIBRARY_PATH := $(_PYTHON_LIB_DIR)$(if $(LD_LIBRARY_PATH),:$(LD_LIBRARY_PATH))
 export LD_LIBRARY_PATH
-export LIBPYTHON_LOC    := $(shell cocotb-config --libpython)
-export PYGPI_PYTHON_BIN := $(shell which python3)
-
-# Lattice Questa license servers
-export LM_LICENSE_FILE     := 1850@ldc-virtlic02
-export SALT_LICENSE_SERVER := 1717@lrd-virtlic-rh8-01:1717@lrd-virtlic-ha-01a:1717@lrd-virtlic-ha-01b
+endif
+export LIBPYTHON_LOC    := $(shell cocotb-config --libpython 2>/dev/null)
+export PYGPI_PYTHON_BIN := $(shell which python3 2>/dev/null)
+endif
 
 # vlog compile flags
 COMPILE_ARGS += -sv
 
-# Pull in cocotb's Questa Makefile rules
-# This provides the 'sim', 'compile', and 'clean' targets automatically.
-include $(shell cocotb-config --makefiles)/Makefile.sim
+# Flow selection: cocotb (Python) or rtl (pure Verilog tb_rom.v)
+FLOW ?= cocotb
+
+# Tools for direct RTL simulation
+VLOG := vlog
+VSIM := vsim
+TESTBENCH := $(CURDIR)/testbench/tb_rom.v
+
+# Optional: test case selection for RTL (+TC=) or cocotb (TESTCASE=)
+TC ?=
+ifdef TC
+SIM_ARGS += +TC=$(TC)
+endif
 
 # Ensure results/ exists before vsim writes the WLF
 .PHONY: results_dir
-sim: results_dir
 results_dir:
 	@mkdir -p $(RESULTS_DIR)
+
+ifeq ($(FLOW),rtl)
+# ── Direct Verilog simulation flow ────────────────────────────────────────────
+.PHONY: sim
+sim: results_dir
+	@mkdir -p $(SIM_BUILD)
+	vlib $(SIM_BUILD)/work
+	$(VLOG) -work $(SIM_BUILD)/work $(COMPILE_ARGS) $(VERILOG_SOURCES) $(TESTBENCH)
+	$(VSIM) -work $(SIM_BUILD)/work -c -L $(DEVICE_FAMILY) -L pmi_work \
+		-GFAMILY=$(FAMILY) \
+		-GRDATA_WIDTH=$(RDATA_WIDTH) -GRADDR_DEPTH=$(RADDR_DEPTH) \
+		-GREGMODE=$(REGMODE) -GRESETMODE=$(RESETMODE) \
+		-GOUTPUT_CLK_EN=$(OUTPUT_CLK_EN) -GECC_ENABLE=$(ECC_ENABLE) \
+		-GINIT_MODE=$(INIT_MODE) -GINIT_FILE=$(INIT_FILE) \
+		-GINIT_FILE_FORMAT=$(INIT_FILE_FORMAT) \
+		-voptargs="+acc" -suppress 12130 \
+		-wlf $(WLF_FILE) \
+		$(if $(TC),+TC=$(TC),) \
+		-do "log -r /*; run -all; quit" \
+		tb_rom
+else
+# ── CoCoTB simulation flow ────────────────────────────────────────────────────
+# Pull in cocotb's Questa Makefile rules (provides sim, compile, clean)
+include $(shell cocotb-config --makefiles)/Makefile.sim
+sim: results_dir
+endif
 
 # Override clean to also remove results/ and QuestaSim runtime artifacts
 clean::

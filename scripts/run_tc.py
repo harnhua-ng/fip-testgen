@@ -16,6 +16,7 @@ Or via make:
 import os
 import re
 import sys
+import time
 import subprocess
 from dataclasses import dataclass
 
@@ -246,9 +247,12 @@ def run_sim(tc_id, tc):
     sim_build   = os.path.join(REPO_ROOT, "sim_build", "tc-" + tc_id)
     log_file    = os.path.join(results_dir, "tc-" + tc_id + ".log")
 
-    _, wlf_rel = _artifact_paths(tc_id)
+    log_rel, wlf_rel, _ = _artifact_paths(tc_id)
+    tc_plusarg = tc_id.replace("-", "_")
+    flow = os.getenv("FLOW", "cocotb")
     cmd = [
         "make", "-C", REPO_ROOT, "sim",
+        "FLOW="            + flow,
         "REGMODE="         + tc.regmode,
         "RDATA_WIDTH="     + str(tc.rdata_width),
         "RADDR_DEPTH="     + str(tc.raddr_depth),
@@ -258,6 +262,7 @@ def run_sim(tc_id, tc):
         "INIT_MODE="       + tc.init_mode,
         "INIT_FILE_FORMAT=" + tc.init_file_format,
         "TESTCASE="        + tc.testcase,
+        "TC="              + tc_plusarg,
         "SIM_BUILD="       + sim_build,
         "WLF_FILE="        + os.path.join(REPO_ROOT, wlf_rel),
     ]
@@ -267,9 +272,10 @@ def run_sim(tc_id, tc):
     os.makedirs(results_dir, exist_ok=True)
     print("")
     print("=" * 66)
-    print("  TC-" + tc_id + "  " + tc.testcase)
+    print(f"  TC-{tc_id}  {tc.testcase} (FLOW={flow})")
     print("=" * 66)
 
+    t0 = time.time()
     with open(log_file, "w") as log:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True)
@@ -277,8 +283,17 @@ def run_sim(tc_id, tc):
             sys.stdout.write(line)
             log.write(line)
         proc.wait()
+    real_s = time.time() - t0
 
-    return proc.returncode
+    with open(log_file, "a") as log:
+        log.write(f"REAL_TIME_S={real_s:.3f}\n")
+
+    rc = proc.returncode
+    if rc == 0:
+        parsed = _parse_log(log_file)
+        if parsed and parsed[0] == "FAIL":
+            rc = 1
+    return rc
 
 
 def run_drc():
@@ -297,30 +312,52 @@ def run_drc():
 _RESULT_RE = re.compile(
     r'\*\*\s+(\S+)\s+(PASS|FAIL|SKIP)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*\*\*'
 )
+_PASS_RE = re.compile(r'SIMULATION PASSED')
+_FAIL_RE = re.compile(r'SIMULATION FAILED')
+_SIM_TIME_RE = re.compile(r'#\s+Time:\s+([\d.]+)\s+ns', re.IGNORECASE)
+_REAL_TIME_RE = re.compile(r'REAL_TIME_S=([\d.]+)')
 
 
 def _parse_log(log_file):
-    """Return (status, sim_ns, real_s, ratio) from the CoCoTB table in a log, or None."""
+    """Return (status, sim_ns, real_s, ratio) from CoCoTB or Verilog testbench log, or None."""
+    status = None
+    sim_ns = None
+    real_s = None
     try:
         with open(log_file) as f:
             for line in f:
+                # Check cocotb table first
                 m = _RESULT_RE.search(line)
                 if m and m.group(1) != "TEST":
                     return m.group(2), float(m.group(3)), float(m.group(4)), float(m.group(5))
+                # Check Verilog displays
+                if _PASS_RE.search(line):
+                    status = "PASS"
+                elif _FAIL_RE.search(line):
+                    status = "FAIL"
+                m_sim = _SIM_TIME_RE.search(line)
+                if m_sim:
+                    sim_ns = float(m_sim.group(1))
+                m_real = _REAL_TIME_RE.search(line)
+                if m_real:
+                    real_s = float(m_real.group(1))
     except OSError:
         pass
+    if status is not None:
+        return status, sim_ns, real_s, None
     return None
 
 
 def _artifact_paths(tc_id):
-    """Return (log_relpath, wlf_relpath) relative to REPO_ROOT."""
+    """Return (log_relpath, wlf_relpath, trace_relpath) relative to REPO_ROOT."""
     stem = "tc-" + tc_id
-    return os.path.join("results", stem + ".log"), os.path.join("results", stem + ".wlf")
+    trace_path = os.path.join("results", stem + "_trace.v")
+    trace_display = trace_path if os.path.isfile(os.path.join(REPO_ROOT, trace_path)) else "--"
+    return os.path.join("results", stem + ".log"), os.path.join("results", stem + ".wlf"), trace_display
 
 
 def _print_group_summary(tg_id, tc_ids, failures):
     results_dir = os.path.join(REPO_ROOT, "results")
-    W = 58
 
     rows = []
     for tc_id in tc_ids:
@@ -332,31 +369,54 @@ def _print_group_summary(tg_id, tc_ids, failures):
         else:
             status = "FAIL" if tc_id in failures else "SKIP"
             sim_ns = real_s = None
-        log_rel, wlf_rel = _artifact_paths(tc_id)
-        rows.append((tc_id, status, sim_ns, real_s, log_rel, wlf_rel))
+        log_rel, wlf_rel, trace_rel = _artifact_paths(tc_id)
+        rows.append((tc_id, status, sim_ns, real_s, log_rel, wlf_rel, trace_rel))
 
     # ── Artifacts table ───────────────────────────────────────────────────
     log_w = max(len(r[4]) for r in rows)
     wlf_w = max(len(r[5]) for r in rows)
-    art_W = 10 + 2 + log_w + 2 + wlf_w + 2
+    trc_w = max(max(len(r[6]) for r in rows), len("VERILOG TRACE"))
+    art_W = 10 + 2 + log_w + 2 + wlf_w + 2 + trc_w + 2
     print("")
     print("=" * art_W)
-    print("  TG-{} — Artifacts".format(tg_id))
+    print(f"  TG-{tg_id} — Artifacts")
     print("=" * art_W)
-    print("  {:<10}  {:<{}}  {:<{}}".format("TC", "LOG", log_w, "WAVEFORM", wlf_w))
+    print(f"  {'TC':<10}  {'LOG':<{log_w}}  {'WAVEFORM':<{wlf_w}}  {'VERILOG TRACE':<{trc_w}}")
     print("  " + "-" * (art_W - 2))
-    for tc_id, status, sim_ns, real_s, log_rel, wlf_rel in rows:
-        print("  {:<10}  {:<{}}  {:<{}}".format(
-            "TC-" + tc_id, log_rel, log_w, wlf_rel, wlf_w))
+    for tc_id, status, sim_ns, real_s, log_rel, wlf_rel, trace_rel in rows:
+        print(f"  {'TC-' + tc_id:<10}  {log_rel:<{log_w}}  {wlf_rel:<{wlf_w}}  {trace_rel:<{trc_w}}")
 
     # ── Results table ─────────────────────────────────────────────────────
     res_W = 58
     print("")
     print("=" * res_W)
-    print("  TG-{} — Results".format(tg_id))
+    print(f"  TG-{tg_id} — Results")
     print("=" * res_W)
-    print("  {:<10}  {:>6}  {:>13}  {:>13}".format(
-        "TC", "STATUS", "SIM TIME (ns)", "REAL TIME (s)"))
+    print(f"  {'TC':<10}  {'STATUS':>6}  {'SIM TIME (ns)':>13}  {'REAL TIME (s)':>13}")
+    print("  " + "-" * (res_W - 2))
+
+    pass_c = fail_c = skip_c = 0
+    total_ns = total_real = 0.0
+    for tc_id, status, sim_ns, real_s, log_rel, wlf_rel, trace_rel in rows:
+        if   status == "PASS": pass_c += 1
+        elif status == "FAIL": fail_c += 1
+        else:                  skip_c += 1
+        if sim_ns is not None:
+            total_ns   += sim_ns
+            total_real += real_s
+        ns_s    = f"{sim_ns:>13.2f}" if sim_ns is not None else f"{'--':>13}"
+        real_s2 = f"{real_s:>13.2f}" if real_s is not None else f"{'--':>13}"
+        print(f"  {'TC-' + tc_id:<10}  {status:>6}  {ns_s}  {real_s2}")
+
+    n = len(rows)
+    print("  " + "-" * (res_W - 2))
+    print(f"  TESTS={n}  PASS={pass_c}  FAIL={fail_c}  SKIP={skip_c}  {total_ns:>13.2f}  {total_real:>13.2f}")
+    print("=" * res_W)
+    if failures:
+        print(f"  TG-{tg_id}: {len(failures)} FAILED — {', '.join('TC-' + f for f in failures)}")
+    else:
+        print(f"  TG-{tg_id}: all {n} passed")
+    print("=" * res_W)
     print("  " + "-" * (res_W - 2))
 
     pass_c = fail_c = skip_c = 0

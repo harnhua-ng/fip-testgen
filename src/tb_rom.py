@@ -23,10 +23,13 @@ All signals are accessed as dut.<name> — cocotb sees sim_top as the DUT.
 """
 
 import os
+import re
+import functools
 import random
 import cocotb
 from cocotb.clock    import Clock
 from cocotb.triggers import RisingEdge, ReadOnly, Timer
+from cocotb.utils    import get_sim_time
 
 # ── Simulation parameters (set by run.sh via env vars) ───────────────────────
 RDATA_WIDTH    = int(os.getenv("RDATA_WIDTH",    "36"))
@@ -81,8 +84,239 @@ def _make_ref():
 REF = _make_ref()
 
 
+# ── Verilog Runtime Tracer & Trace Generator ──────────────────────────────────
+class VerilogTracer:
+    """Logs Verilog-equivalent statements to the transcript and generates standalone .trace.v files."""
+
+    def __init__(self, tc_name: str, out_dir: str = "results", enabled: bool = True):
+        self.tc_name = tc_name.upper().replace("_", "-")
+        self.out_dir = out_dir
+        self.enabled = enabled
+        self.trace_lines = [
+            "// ============================================================================",
+            f"// Verilog Stimulus & Check Trace: {self.tc_name}",
+            "// Auto-generated at runtime from src/tb_rom.py",
+            "// ============================================================================",
+            f"task automatic run_{self.tc_name.lower().replace('-', '_')}_trace;",
+        ]
+
+    def log_stmt(self, stmt: str):
+        """Print Verilog statement to transcript and record into trace buffer."""
+        if not self.enabled:
+            return
+        try:
+            t_ns = get_sim_time(unit="ns")
+            cocotb.log.info(f"[VERILOG @ {t_ns:7.2f} ns] {stmt}")
+        except Exception:
+            cocotb.log.info(f"[VERILOG] {stmt}")
+        self.trace_lines.append(f"    {stmt}")
+
+    def comment(self, text: str):
+        if self.enabled:
+            self.trace_lines.append(f"\n    // {text}")
+            cocotb.log.info(f"// --- {text} ---")
+
+    def assign(self, signal: str, value: int, width: int = 0):
+        if width > 0:
+            stmt = f"{signal} = {width}'h{value:X};"
+        else:
+            stmt = f"{signal} = 1'b{value};"
+        self.log_stmt(stmt)
+
+    def clock_edge(self, clk_name: str = "rd_clk_i"):
+        self.log_stmt(f"@(posedge {clk_name});")
+
+    def delay_ns(self, ns: int):
+        self.log_stmt(f"#{ns};")
+
+    def check(self, cycle: int, addr_pipe: int, got_sig: str, exp_val: int, hex_w: int):
+        stmt = (
+            f"if ({got_sig} !== {hex_w * 4}'h{exp_val:0{hex_w}X}) begin\n"
+            f'        $display("[{self.tc_name}] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x{exp_val:0{hex_w}X}", {cycle}, {addr_pipe}, {got_sig});\n'
+            f"        errors++;\n"
+            f"    end"
+        )
+        self.log_stmt(stmt)
+
+    def save(self):
+        if not self.enabled:
+            return
+        os.makedirs(self.out_dir, exist_ok=True)
+        path = os.path.join(self.out_dir, f"{self.tc_name.lower()}_trace.v")
+        self.trace_lines.append("endtask\n")
+        with open(path, "w") as f:
+            f.write("\n".join(self.trace_lines))
+        cocotb.log.info(f"[{self.tc_name}] Verilog trace written to: {path}")
+
+
+# ── Pipeline Alignment Monitor & Matrix Generator (Approach A: UVM/TLM Pattern)
+class PipelineMatrixMonitor:
+    """Cycle-by-cycle passive pipeline monitor and alignment matrix generator.
+
+    Adheres to industry-standard UVM monitor / scoreboarding & TLM principles:
+    - Runs as a concurrent, non-intrusive background coroutine (Observer pattern).
+    - Passively samples inputs on clock posedges in the Active phase.
+    - Captures outputs and evaluates assertions in the ReadOnly (Postponed) phase.
+    - Generates a cycle-by-cycle Markdown pipeline alignment matrix report.
+    """
+
+    def __init__(self, dut, tc_name: str, latency: int = None, out_dir: str = "results", enabled: bool = True):
+        self.dut = dut
+        self.tc_name = tc_name.upper().replace("_", "-")
+        self.latency = latency if latency is not None else LAT
+        self.out_dir = out_dir
+        self.enabled = enabled
+        self.rows = []
+        self.cycle = 0
+        self.pipe_queue = [None] * self.latency
+        self._running = False
+        self._task = None
+
+    def start(self):
+        """Start the background monitor task."""
+        if not self.enabled:
+            return self
+        self._running = True
+        self._task = cocotb.start_soon(self._monitor_loop())
+        return self
+
+    async def _monitor_loop(self):
+        hex_w = (RDATA_WIDTH + 3) // 4
+        while self._running:
+            await RisingEdge(self.dut.rd_clk_i)
+            self.cycle += 1
+            t_ns = get_sim_time(unit="ns")
+
+            # Sample inputs in Active phase
+            rst_val = self.dut.rst_i.value
+            rst = int(rst_val) if rst_val.is_resolvable else -1
+
+            rden_val = self.dut.rd_en_i.value
+            rden = int(rden_val) if rden_val.is_resolvable else 0
+
+            clken_val = self.dut.rd_clk_en_i.value
+            clken = int(clken_val) if clken_val.is_resolvable else 0
+
+            outclken_val = self.dut.rd_out_clk_en_i.value
+            outclken = int(outclken_val) if outclken_val.is_resolvable else 0
+
+            addr_val = self.dut.rd_addr_i.value
+            addr = int(addr_val) if addr_val.is_resolvable else None
+
+            # Settle outputs in ReadOnly phase
+            await ReadOnly()
+
+            data_val = self.dut.rd_data_o.value
+            got = int(data_val) if data_val.is_resolvable else None
+
+            # Pop the address emerging from the pipeline
+            exp_addr = self.pipe_queue.pop(0) if self.pipe_queue else None
+
+            # Shift address into pipeline
+            if rst == 0 and rden == 1 and clken == 1 and addr is not None:
+                self.pipe_queue.append(addr)
+            elif clken == 0:
+                # Clock enable low freezes pipeline
+                self.pipe_queue.insert(0, exp_addr)
+            else:
+                self.pipe_queue.append(None)
+
+            # Determine expected data and verification status
+            exp_data = REF[exp_addr] if (exp_addr is not None and 0 <= exp_addr < len(REF)) else None
+
+            if rst == 1 and RESETMODE == "sync" and REGMODE == "reg":
+                exp_data = 0
+
+            if exp_data is not None and got is not None:
+                status = "PASS" if got == exp_data else "MISMATCH"
+            elif rst == 1:
+                status = "RESET"
+            elif exp_data is None and got is not None:
+                status = "IDLE/PRIME"
+            else:
+                status = "UNKNOWN"
+
+            self.rows.append({
+                "time_ns": f"{t_ns:7.2f}",
+                "cycle": self.cycle,
+                "rst": str(rst) if rst >= 0 else "X",
+                "enables": f"E:{rden} C:{clken} O:{outclken}",
+                "addr_in": f"0x{addr:X}" if addr is not None else str(addr_val),
+                "pipe_addr": f"0x{exp_addr:X}" if exp_addr is not None else "--",
+                "data_out": f"0x{got:0{hex_w}X}" if got is not None else str(data_val),
+                "exp_data": f"0x{exp_data:0{hex_w}X}" if exp_data is not None else "--",
+                "status": status,
+            })
+
+    def stop_and_save(self):
+        """Stop monitoring and write the alignment matrix to results/<tc_name>_matrix.md."""
+        self._running = False
+        if not self.enabled or not self.rows:
+            return
+
+        os.makedirs(self.out_dir, exist_ok=True)
+        file_path = os.path.join(self.out_dir, f"{self.tc_name.lower()}_matrix.md")
+
+        lines = [
+            f"# Pipeline Alignment Matrix — {self.tc_name}",
+            f"",
+            f"- **Design Under Test**: `lscc_rom` (LIFCL)",
+            f"- **Parameters**: `REGMODE={REGMODE}` (LAT={self.latency}), `RDATA_WIDTH={RDATA_WIDTH}`, `RADDR_DEPTH={RADDR_DEPTH}`, `RESETMODE={RESETMODE}`, `INIT_MODE={INIT_MODE}`",
+            f"- **Total Monitored Cycles**: {len(self.rows)}",
+            f"",
+            f"| Time (ns) | Cycle | RST | Enables (E/C/O) | `rd_addr_i` | Latched Addr | `rd_data_o` | Expected (`REF`) | Status |",
+            f"| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
+        ]
+
+        for r in self.rows:
+            stat_str = f"**{r['status']}**" if r['status'] == "MISMATCH" else r['status']
+            lines.append(
+                f"| {r['time_ns']} | {r['cycle']} | {r['rst']} | {r['enables']} | {r['addr_in']} | "
+                f"{r['pipe_addr']} | {r['data_out']} | {r['exp_data']} | {stat_str} |"
+            )
+
+        with open(file_path, "w") as f:
+            f.write("\n".join(lines) + "\n")
+        cocotb.log.info(f"[{self.tc_name}] Pipeline matrix written to: {file_path}")
+
+    async def __aenter__(self):
+        self.start()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        self.stop_and_save()
+
+
+# ── Global Test Hook: Automatically integrate Approach A into every cocotb.test
+_orig_cocotb_test = cocotb.test
+
+def _cocotb_test_with_matrix(*args, **kwargs):
+    """Transparent wrapper around cocotb.test that attaches PipelineMatrixMonitor to every test."""
+    def decorator(func):
+        @functools.wraps(func)
+        async def test_wrapper(dut, *t_args, **t_kwargs):
+            m = re.match(r'tc_(\d+)_(\d+)', func.__name__)
+            tc_name = f"TC-{m.group(1)}-{m.group(2)}" if m else func.__name__.upper()
+            mon = PipelineMatrixMonitor(dut, tc_name).start()
+            try:
+                return await func(dut, *t_args, **t_kwargs)
+            finally:
+                mon.stop_and_save()
+
+        return _orig_cocotb_test(*args, **kwargs)(test_wrapper)
+
+    if len(args) == 1 and callable(args[0]):
+        func = args[0]
+        args = ()
+        return decorator(func)
+    return decorator
+
+# Apply wrapper so all tests defined with @cocotb.test automatically generate alignment matrices
+cocotb.test = _cocotb_test_with_matrix
+
+
 # ── Shared infrastructure ─────────────────────────────────────────────────────
-async def do_reset(dut):
+async def do_reset(dut, tracer: VerilogTracer = None):
     """Assert rst_i for RST_NS with all enables low, then release and sync to clock.
 
     Mirrors the golden testbench: rst_i=1 for RESET_CNT, then de-assert and
@@ -95,6 +329,17 @@ async def do_reset(dut):
     rst_i = 0;
     @(posedge rd_clk_i);    // sync to first post-reset rising edge
     """
+    if tracer:
+        tracer.comment("Reset sequence")
+        tracer.assign("rst_i", 1)
+        tracer.assign("rd_en_i", 0)
+        tracer.assign("rd_clk_en_i", 0)
+        tracer.assign("rd_out_clk_en_i", 0)
+        tracer.assign("rd_addr_i", 0, width=max(1, (RADDR_DEPTH - 1).bit_length()))
+        tracer.delay_ns(RST_NS)
+        tracer.assign("rst_i", 0)
+        tracer.clock_edge("rd_clk_i")
+
     dut.rst_i.value           = 1
     dut.rd_en_i.value         = 0
     dut.rd_clk_en_i.value     = 0
@@ -105,15 +350,21 @@ async def do_reset(dut):
     await RisingEdge(dut.rd_clk_i)   # sync to first post-reset edge
 
 
-async def single_read(dut, addr):
+async def single_read(dut, addr, tracer: VerilogTracer = None):
     """Drive addr after the current clock edge, wait LAT cycles, return rd_data_o.
 
     Prerequisite: rd_en_i, rd_clk_en_i, and rd_out_clk_en_i must already be 1.
     """
+    raddr_w = max(1, (RADDR_DEPTH - 1).bit_length())
     await RisingEdge(dut.rd_clk_i)
     dut.rd_addr_i.value = addr
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rd_addr_i", addr, width=raddr_w)
     for _ in range(LAT):
         await RisingEdge(dut.rd_clk_i)
+        if tracer:
+            tracer.clock_edge("rd_clk_i")
     await ReadOnly()
     return int(dut.rd_data_o.value)
 
@@ -136,13 +387,19 @@ async def single_read_ecc(dut, addr):
     )
 
 
-async def enable_reads(dut):
+async def enable_reads(dut, tracer: VerilogTracer = None):
     """Assert all three read enable signals.
 
     Verilog equivalent
     ------------------
     rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
     """
+    if tracer:
+        tracer.comment("Enable reads")
+        tracer.assign("rd_en_i", 1)
+        tracer.assign("rd_clk_en_i", 1)
+        tracer.assign("rd_out_clk_en_i", 1)
+
     dut.rd_en_i.value         = 1
     dut.rd_clk_en_i.value     = 1
     dut.rd_out_clk_en_i.value = 1
@@ -204,7 +461,7 @@ async def full_sweep_ecc(dut, tc):
     dut._log.info(f"{tc} PASSED  ({RADDR_DEPTH} reads, no ECC flags, ECC_ENABLE={ECC_ENABLE})")
 
 
-async def latency_check(dut, tc, n_addrs=16):
+async def latency_check(dut, tc, n_addrs=16, tracer: VerilogTracer = None):
     """Drive n_addrs sequential addresses and verify output lags by exactly LAT cycles.
 
     Pipeline phases:
@@ -239,17 +496,30 @@ async def latency_check(dut, tc, n_addrs=16):
     """
     errors = 0
     hex_w  = (RDATA_WIDTH + 3) // 4
+    raddr_w = max(1, (RADDR_DEPTH - 1).bit_length())
 
+    if tracer:
+        tracer.comment(f"Prime: fill {LAT} pipeline stage(s)")
     for i in range(LAT):
         await RisingEdge(dut.rd_clk_i)
         dut.rd_addr_i.value = i
+        if tracer:
+            tracer.clock_edge("rd_clk_i")
+            tracer.assign("rd_addr_i", i, width=raddr_w)
 
+    if tracer:
+        tracer.comment(f"Steady: drive addr[i] and sample addr[i-{LAT}]")
     for i in range(LAT, n_addrs):
         await RisingEdge(dut.rd_clk_i)
         dut.rd_addr_i.value = i
+        if tracer:
+            tracer.clock_edge("rd_clk_i")
+            tracer.assign("rd_addr_i", i, width=raddr_w)
         await ReadOnly()
         got = int(dut.rd_data_o.value)
         exp = REF[i - LAT]
+        if tracer:
+            tracer.check(i, i - LAT, "rd_data_o", exp, hex_w)
         if got != exp:
             dut._log.error(
                 f"[{tc}] cycle {i}: addr_in_pipeline={i - LAT} "
@@ -257,11 +527,17 @@ async def latency_check(dut, tc, n_addrs=16):
             )
             errors += 1
 
+    if tracer:
+        tracer.comment("Drain: flush last pipeline stages")
     for j in range(n_addrs - LAT, n_addrs):
         await RisingEdge(dut.rd_clk_i)
+        if tracer:
+            tracer.clock_edge("rd_clk_i")
         await ReadOnly()
         got = int(dut.rd_data_o.value)
         exp = REF[j]
+        if tracer:
+            tracer.check(n_addrs + (j - (n_addrs - LAT)), j, "rd_data_o", exp, hex_w)
         if got != exp:
             dut._log.error(
                 f"[{tc}] drain: addr_in_pipeline={j} "
@@ -320,10 +596,12 @@ async def tc_01_01_sequential_read_noreg(dut):
       else $error("[TC-01-01] drain: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
                   15, rd_data_o, REF[15]);
     """
+    tracer = VerilogTracer("TC-01-01", enabled=True)
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-    await latency_check(dut, "TC-01-01")
+    await do_reset(dut, tracer)
+    await enable_reads(dut, tracer)
+    await latency_check(dut, "TC-01-01", n_addrs=16, tracer=tracer)
+    tracer.save()
 
 
 @cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
