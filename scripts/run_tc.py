@@ -15,6 +15,7 @@ Or via make:
 
 import os
 import re
+import shutil
 import sys
 import time
 import subprocess
@@ -72,16 +73,13 @@ TC_MAP = {
 
     # ── TG-02  Read Enable ───────────────────────────────────────────────────
     "02-01": TC("tc_02_01_rd_en_zero_at_start",
-                regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1,
-                init_mode="mem_file", init_file="testbench/rom_init.hex"),
+                regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1),
     "02-02": TC("tc_02_02_rd_en_deasserted_mid_seq",
-                regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1,
-                init_mode="mem_file", init_file="testbench/rom_init.hex"),
+                regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1),
     "02-03": TC("tc_02_03_rd_en_toggle_every_cycle",
                 regmode="noreg", rdata_width=18, raddr_depth=1024),
     "02-04": TC("tc_02_04_rd_en_resumes",
-                regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1,
-                init_mode="mem_file", init_file="testbench/rom_init.hex"),
+                regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1),
 
     # ── TG-03  Read Clock Enable ─────────────────────────────────────────────
     "03-01": TC("tc_03_01_clk_en_zero_holds_noreg",
@@ -99,8 +97,7 @@ TC_MAP = {
     "04-01": TC("tc_04_01_out_clk_en_zero_freezes_output",
                 regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1),
     "04-02": TC("tc_04_02_out_clk_en_normal_operation",
-                regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1,
-                init_mode="mem_file", init_file="testbench/rom_init.hex"),
+                regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1),
     "04-03": TC("tc_04_03_out_clk_en_toggle_mid_seq",
                 regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1),
     "04-04": TC("tc_04_04_output_clk_en_param_zero_no_effect",
@@ -258,7 +255,7 @@ def run_sim(tc_id, tc):
     sim_build   = os.path.join(REPO_ROOT, "sim_build", "tc-" + tc_id)
     log_file    = os.path.join(results_dir, "tc-" + tc_id + ".log")
 
-    log_rel, wlf_rel, _ = _artifact_paths(tc_id)
+    log_rel, wlf_rel, _, _ = _artifact_paths(tc_id)
     tc_plusarg = tc_id.replace("-", "_")
     flow = os.getenv("FLOW", "cocotb")
     cmd = [
@@ -299,6 +296,15 @@ def run_sim(tc_id, tc):
 
     with open(log_file, "a") as log:
         log.write(f"REAL_TIME_S={real_s:.3f}\n")
+
+    # Copy compiled work library to results/ so the engineer can reload
+    # the simulation in QuestaSim without keeping sim_build/ around.
+    work_src = os.path.join(sim_build, "work")
+    work_dst = os.path.join(results_dir, "tc-" + tc_id, "work")
+    if os.path.isdir(work_src):
+        if os.path.exists(work_dst):
+            shutil.rmtree(work_dst)
+        shutil.copytree(work_src, work_dst)
 
     rc = proc.returncode
     if rc == 0:
@@ -361,11 +367,18 @@ def _parse_log(log_file):
 
 
 def _artifact_paths(tc_id):
-    """Return (log_relpath, wlf_relpath, trace_relpath) relative to REPO_ROOT."""
+    """Return (log_relpath, wlf_relpath, work_relpath, trace_relpath) relative to REPO_ROOT."""
     stem = "tc-" + tc_id
     trace_path = os.path.join("results", stem + "_trace.v")
     trace_display = trace_path if os.path.isfile(os.path.join(REPO_ROOT, trace_path)) else "--"
-    return os.path.join("results", stem + ".log"), os.path.join("results", stem + ".wlf"), trace_display
+    work_path = os.path.join("results", stem, "work")
+    work_display = work_path if os.path.isdir(os.path.join(REPO_ROOT, work_path)) else "--"
+    return (
+        os.path.join("results", stem + ".log"),
+        os.path.join("results", stem + ".wlf"),
+        work_display,
+        trace_display,
+    )
 
 
 def _print_group_summary(tg_id, tc_ids, failures):
@@ -381,22 +394,23 @@ def _print_group_summary(tg_id, tc_ids, failures):
         else:
             status = "FAIL" if tc_id in failures else "SKIP"
             sim_ns = real_s = None
-        log_rel, wlf_rel, trace_rel = _artifact_paths(tc_id)
-        rows.append((tc_id, status, sim_ns, real_s, log_rel, wlf_rel, trace_rel))
+        log_rel, wlf_rel, work_rel, trace_rel = _artifact_paths(tc_id)
+        rows.append((tc_id, status, sim_ns, real_s, log_rel, wlf_rel, work_rel, trace_rel))
 
     # ── Artifacts table ───────────────────────────────────────────────────
-    log_w = max(len(r[4]) for r in rows)
-    wlf_w = max(len(r[5]) for r in rows)
-    trc_w = max(max(len(r[6]) for r in rows), len("VERILOG TRACE"))
-    art_W = 10 + 2 + log_w + 2 + wlf_w + 2 + trc_w + 2
+    log_w  = max(len(r[4]) for r in rows)
+    wlf_w  = max(len(r[5]) for r in rows)
+    work_w = max(max(len(r[6]) for r in rows), len("WORK DIR"))
+    trc_w  = max(max(len(r[7]) for r in rows), len("VERILOG TRACE"))
+    art_W  = 10 + 2 + log_w + 2 + wlf_w + 2 + work_w + 2 + trc_w + 2
     print("")
     print("=" * art_W)
     print(f"  TG-{tg_id} — Artifacts")
     print("=" * art_W)
-    print(f"  {'TC':<10}  {'LOG':<{log_w}}  {'WAVEFORM':<{wlf_w}}  {'VERILOG TRACE':<{trc_w}}")
+    print(f"  {'TC':<10}  {'LOG':<{log_w}}  {'WAVEFORM':<{wlf_w}}  {'WORK DIR':<{work_w}}  {'VERILOG TRACE':<{trc_w}}")
     print("  " + "-" * (art_W - 2))
-    for tc_id, status, sim_ns, real_s, log_rel, wlf_rel, trace_rel in rows:
-        print(f"  {'TC-' + tc_id:<10}  {log_rel:<{log_w}}  {wlf_rel:<{wlf_w}}  {trace_rel:<{trc_w}}")
+    for tc_id, status, sim_ns, real_s, log_rel, wlf_rel, work_rel, trace_rel in rows:
+        print(f"  {'TC-' + tc_id:<10}  {log_rel:<{log_w}}  {wlf_rel:<{wlf_w}}  {work_rel:<{work_w}}  {trace_rel:<{trc_w}}")
 
     # ── Results table ─────────────────────────────────────────────────────
     res_W = 58
