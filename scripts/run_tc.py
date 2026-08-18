@@ -72,13 +72,16 @@ TC_MAP = {
 
     # ── TG-02  Read Enable ───────────────────────────────────────────────────
     "02-01": TC("tc_02_01_rd_en_zero_at_start",
-                regmode="reg", rdata_width=36, raddr_depth=512),
+                regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1,
+                init_mode="mem_file", init_file="testbench/rom_init.hex"),
     "02-02": TC("tc_02_02_rd_en_deasserted_mid_seq",
-                regmode="reg", rdata_width=36, raddr_depth=512),
+                regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1,
+                init_mode="mem_file", init_file="testbench/rom_init.hex"),
     "02-03": TC("tc_02_03_rd_en_toggle_every_cycle",
                 regmode="noreg", rdata_width=18, raddr_depth=1024),
     "02-04": TC("tc_02_04_rd_en_resumes",
-                regmode="reg", rdata_width=36, raddr_depth=512),
+                regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1,
+                init_mode="mem_file", init_file="testbench/rom_init.hex"),
 
     # ── TG-03  Read Clock Enable ─────────────────────────────────────────────
     "03-01": TC("tc_03_01_clk_en_zero_holds_noreg",
@@ -96,7 +99,8 @@ TC_MAP = {
     "04-01": TC("tc_04_01_out_clk_en_zero_freezes_output",
                 regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1),
     "04-02": TC("tc_04_02_out_clk_en_normal_operation",
-                regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1),
+                regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1,
+                init_mode="mem_file", init_file="testbench/rom_init.hex"),
     "04-03": TC("tc_04_03_out_clk_en_toggle_mid_seq",
                 regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1),
     "04-04": TC("tc_04_04_output_clk_en_param_zero_no_effect",

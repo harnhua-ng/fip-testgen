@@ -16,16 +16,16 @@ If you are an RTL designer or verification engineer accustomed to SystemVerilog 
 │   • Background Monitors (UVM Monitor / Scoreboard)     │
 └─────────────────────────┬──────────────────────────────┘
                           │ VPI / FLI / VHPI (Co-Simulation)
-┌─────────────────────────▼──────────────────────────────┐
-│             Lattice QuestaSim / HDL Simulator          │
-│   • Clock & Reset Signals                              │
-│   • testgen_top.v / tb_rom.v                           │
-│   • DUT: lscc_rom.v (EBR Primitives / PDPSC16K)        │
-│   • Waveforms (.wlf) & Simulation Transcripts          │
-└────────────────────────────────────────────────────────┘
+┌─────────────────────────▼────────────────────────┐
+│       Lattice QuestaSim / HDL Simulator          │
+│   • Clock & Reset Signals                        │
+│   • Testbench Verilog                            │
+│   • DUT Verilog                                  │
+│   • Waveforms (.wlf) & Simulation Transcripts    │
+└──────────────────────────────────────────────────┘
 ```
 
-### Python (Cocotb) to SystemVerilog / Verilog Mapping
+### Python (Cocotb) Maps to SystemVerilog / Verilog
 
 Cocotb uses Python `async` coroutines that interact with the simulator's event queue via standard Verilog Procedural Interface (VPI) callbacks:
 
@@ -42,7 +42,7 @@ Cocotb uses Python `async` coroutines that interact with the simulator's event q
 
 ## Verification Architecture: UVM & Transaction-Level Modeling
 
-This testbench uses standard **UVM (Universal Verification Methodology)** and **Transaction-Level Modeling (TLM)** approach to monitor of cycles and signals:
+The approach is actually similar to standard **UVM (Universal Verification Methodology)** and **Transaction-Level Modeling (TLM)** monitoring of cycles and signals:
 
 ```
                          ┌────────────────────────────────────────────────┐
@@ -52,10 +52,10 @@ This testbench uses standard **UVM (Universal Verification Methodology)** and **
                          └──────────────┬─────────────────────────────────┘
                                         │ (Drives DUT)
                                         ▼
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│                               DUT (lscc_rom)                                     │
-│   rd_clk_i ──> [Addr Reg] ──> [EBR Core Matrix] ──> [Output Reg] ──> rd_data_o   │
-└───────────────────────────────────────┬──────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│                               DUT (IP block)                   │
+│   Clock ──> Input Reg ──> IP Logic ──> Output Reg ──> Output   │
+└───────────────────────────────────────┬────────────────────────┘
                                         │ (Observes Pins)
                                         ▼
                          ┌───────────────────────────────┐
@@ -66,23 +66,49 @@ This testbench uses standard **UVM (Universal Verification Methodology)** and **
                          └───────────────────────────────┘
 ```
 
-1. **Decoupling of Stimulus and Analysis (UVM Standard)**:
-   * **Test sequences** focus solely on *what scenario to stimulate* (e.g., burst reads, random addresses, toggling clock enables).
+1. **Decouples Stimulus and Analysis (UVM Standard)**:
+   * **Test sequences** focus only on *what scenario to stimulate* (e.g., burst reads, random addresses, toggling clock enables).
    * The **`PipelineMatrixMonitor`** runs as an observer (`cocotb.start_soon`) that monitors port signals every clock cycle, like a UVM `uvm_monitor` and `uvm_scoreboard`.
 2. **Handles Dynamic Stalls and Pipeline Backpressure**:
-   * Hardware memory operations may stall (e.g., `rd_clk_en_i=0` or `rd_out_clk_en_i=0`). The monitor models internal stage holding without requiring complex loop arithmetic in each test.
+   * Hardware memory operations may stall (e.g., `rd_clk_en_i=0` or `rd_out_clk_en_i=0`). The monitor models internal stage holding without needing complex loop arithmetic in each test.
 3. **Catches Unprompted Glitches and Out-of-Spec Toggles**:
    * If `rd_data_o` or error flags change when no read was executed, the monitor catches and reports the protocol violation.
 
 ---
 
-## Cycle-by-Cycle Map
+## Debugging Map for Each Test
 
-Every test run generates a **Cycle-by-cycle Matrix** (`results/<tc_name>_matrix.md`) as a way to provide cycle-by-cycle traces:  
-(Example for TC-01-01)
+| Python Code | Verilog Trace | Cycle-by-cycle Matrix |
+| :--- | :--- | :--- |
+| [Python cocotb test](#python-cocotb-test) | [Verilog Trace](#corresponding-verilog-trace) | [Cycle-by-cycle Matrix](#corresponding-cycle-by-cycle-matrix) |
 
-### Verilog Trace
+Every test run generates a **Cycle-by-cycle Matrix** (`results/<tc_name>_matrix.md`) to provide cycle-by-cycle traces.  
+Example for TC-01-01:
 
+### Python cocotb Test
+
+``` python
+@cocotb.test(skip=(REGMODE != "noreg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512
+                   or INIT_MODE != "mem_file"))
+async def tc_01_01_sequential_read_noreg(dut):
+    """TC-01-01: rd_data_o = mem[addr] after exactly 1 clock cycle (noreg, 36bx512).
+
+    Drives 16 sequential addresses in a pipelined pattern.  At each cycle the
+    address presented one cycle earlier must appear at rd_data_o, proving that
+    the pipeline latency is exactly LAT=1.
+    """
+    tracer = VerilogTracer("TC-01-01", enabled=True)
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut, tracer)
+    await enable_reads(dut, tracer)
+    await latency_check(dut, "TC-01-01", n_addrs=16, tracer=tracer)
+    tracer.save()
+```
+
+### Corresponding Verilog Trace  
+(automatically generated by cocotb for each test)
+
+``` verilog
 // ============================================================================
 // Verilog Stimulus & Check Trace: TC-01-01
 // Auto-generated at runtime from src/tb_rom.py
@@ -207,27 +233,9 @@ task automatic run_tc_01_01_trace;
         errors++;
     end
 endtask
+```
 
-
-### Python (cocotb)
-@cocotb.test(skip=(REGMODE != "noreg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512
-                   or INIT_MODE != "mem_file"))
-async def tc_01_01_sequential_read_noreg(dut):
-    """TC-01-01: rd_data_o = mem[addr] after exactly 1 clock cycle (noreg, 36bx512).
-
-    Drives 16 sequential addresses in a pipelined pattern.  At each cycle the
-    address presented one cycle earlier must appear at rd_data_o, proving that
-    the pipeline latency is exactly LAT=1.
-    """
-    tracer = VerilogTracer("TC-01-01", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut, tracer)
-    await enable_reads(dut, tracer)
-    await latency_check(dut, "TC-01-01", n_addrs=16, tracer=tracer)
-    tracer.save()
-
-
-### Cycle-by-Cycle Matrix
+### Corresponding Cycle-by-Cycle Matrix
 
 - **Design Under Test**: `lscc_rom` (LIFCL)
 - **Parameters**: `REGMODE=noreg` (LAT=1), `RDATA_WIDTH=36`, `RADDR_DEPTH=512`, `RESETMODE=sync`, `INIT_MODE=mem_file`
@@ -265,7 +273,6 @@ async def tc_01_01_sequential_read_noreg(dut):
 
 * **Enables**: `E` = `rd_en_i`, `C` = `rd_clk_en_i`, `O` = `rd_out_clk_en_i`.
 * **Latched Addr**: The address currently emerging at the output stage given the configuration's pipeline latency (`LAT=1` for `noreg`, `LAT=2` for `reg`).
-
 
 ---
 

@@ -48,10 +48,10 @@ function Get-TcConfig {
         "01-07" = @{ regmode="noreg"; rdata=9;  rdepth=2048; rst="sync";  out_clk=0; ecc=0; init_mode="all_one";  init_file="none";              init_fmt="hex" }
 
         # ── TG-02  Read Enable ───────────────────────────────────────────────────
-        "02-01" = @{ regmode="reg";   rdata=36; rdepth=512;  rst="sync";  out_clk=0; ecc=0; init_mode="all_one";  init_file="none";              init_fmt="hex" }
-        "02-02" = @{ regmode="reg";   rdata=36; rdepth=512;  rst="sync";  out_clk=0; ecc=0; init_mode="all_one";  init_file="none";              init_fmt="hex" }
+        "02-01" = @{ regmode="reg";   rdata=36; rdepth=512;  rst="sync";  out_clk=1; ecc=0; init_mode="mem_file"; init_file=$default_init_hex;  init_fmt="hex" }
+        "02-02" = @{ regmode="reg";   rdata=36; rdepth=512;  rst="sync";  out_clk=1; ecc=0; init_mode="mem_file"; init_file=$default_init_hex;  init_fmt="hex" }
         "02-03" = @{ regmode="noreg"; rdata=18; rdepth=1024; rst="sync";  out_clk=0; ecc=0; init_mode="all_one";  init_file="none";              init_fmt="hex" }
-        "02-04" = @{ regmode="reg";   rdata=36; rdepth=512;  rst="sync";  out_clk=0; ecc=0; init_mode="all_one";  init_file="none";              init_fmt="hex" }
+        "02-04" = @{ regmode="reg";   rdata=36; rdepth=512;  rst="sync";  out_clk=1; ecc=0; init_mode="mem_file"; init_file=$default_init_hex;  init_fmt="hex" }
 
         # ── TG-03  Read Clock Enable ─────────────────────────────────────────────
         "03-01" = @{ regmode="noreg"; rdata=36; rdepth=512;  rst="sync";  out_clk=0; ecc=0; init_mode="all_one";  init_file="none";              init_fmt="hex" }

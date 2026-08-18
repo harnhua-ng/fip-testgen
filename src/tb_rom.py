@@ -914,6 +914,7 @@ async def tc_02_02_rd_en_deasserted_mid_seq(dut):
     )
 
     # De-assert rd_en_i; drive eight different addresses and verify output never changes.
+    await RisingEdge(dut.rd_clk_i)
     dut.rd_en_i.value = 0
     for addr in range(1, 9):
         await RisingEdge(dut.rd_clk_i)
@@ -972,8 +973,13 @@ async def tc_02_03_rd_en_toggle_every_cycle(dut):
         addr = i * (RADDR_DEPTH // N)
 
         # rd_en_i=1: issue a normal read; output must equal REF[addr].
+        await RisingEdge(dut.rd_clk_i)
         dut.rd_en_i.value = 1
-        got = await single_read(dut, addr)
+        dut.rd_addr_i.value = addr
+        for _ in range(LAT):
+            await RisingEdge(dut.rd_clk_i)
+        await ReadOnly()
+        got = int(dut.rd_data_o.value)
         exp = REF[addr]
         if got != exp:
             dut._log.error(
@@ -984,6 +990,7 @@ async def tc_02_03_rd_en_toggle_every_cycle(dut):
         last_out = got
 
         # rd_en_i=0: one cycle with a deliberately different address — output must hold.
+        await RisingEdge(dut.rd_clk_i)
         dut.rd_en_i.value   = 0
         dut.rd_addr_i.value = (addr + RADDR_DEPTH // 2) % RADDR_DEPTH
         await RisingEdge(dut.rd_clk_i)
@@ -1042,6 +1049,7 @@ async def tc_02_04_rd_en_resumes(dut):
     )
 
     # De-assert rd_en_i for 5 cycles (pipeline drains / freezes).
+    await RisingEdge(dut.rd_clk_i)
     dut.rd_en_i.value = 0
     for _ in range(5):
         await RisingEdge(dut.rd_clk_i)
@@ -1356,6 +1364,7 @@ async def tc_03_05_cascaded_clk_en(dut):
 
     for addr in addrs:
         # Normal read with rd_clk_en_i=1 (re-asserted before each single_read).
+        await RisingEdge(dut.rd_clk_i)
         dut.rd_clk_en_i.value = 1
         got = await single_read(dut, addr)
         exp = REF[addr]
@@ -1366,6 +1375,7 @@ async def tc_03_05_cascaded_clk_en(dut):
             errors += 1
 
         # Freeze rd_clk_en_i for 2 cycles between reads to stress the bank-select logic.
+        await RisingEdge(dut.rd_clk_i)
         dut.rd_clk_en_i.value = 0
         for _ in range(2):
             await RisingEdge(dut.rd_clk_i)
@@ -1723,6 +1733,7 @@ async def tc_05_01_sync_reset_clears_output(dut):
     assert pre_rst == REF[0], f"TC-05-01 pre-condition failed: got=0x{pre_rst:X}"
 
     # Assert sync reset and verify output clears every cycle for 5 cycles.
+    await RisingEdge(dut.rd_clk_i)
     dut.rst_i.value = 1
     for cycle in range(5):
         await RisingEdge(dut.rd_clk_i)
@@ -1733,6 +1744,7 @@ async def tc_05_01_sync_reset_clears_output(dut):
             f"rd_data_o=0x{got:X}, expected 0"
         )
 
+    await RisingEdge(dut.rd_clk_i)
     dut.rst_i.value = 0
     dut._log.info("TC-05-01 PASSED  (sync reset cleared output for 5 cycles)")
 
@@ -1784,6 +1796,7 @@ async def tc_05_02_sync_reset_during_read(dut):
         f"TC-05-02 FAILED: rd_data_o=0x{got:X} one cycle after sync reset, expected 0"
     )
 
+    await RisingEdge(dut.rd_clk_i)
     dut.rst_i.value = 0
     dut._log.info("TC-05-02 PASSED  (sync reset cleared output within one cycle)")
 
