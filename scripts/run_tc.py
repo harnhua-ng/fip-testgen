@@ -423,7 +423,7 @@ def _print_group_summary(tg_id, tc_ids, failures):
 
     pass_c = fail_c = skip_c = 0
     total_ns = total_real = 0.0
-    for tc_id, status, sim_ns, real_s, log_rel, wlf_rel, trace_rel in rows:
+    for tc_id, status, sim_ns, real_s, log_rel, wlf_rel, work_rel, trace_rel in rows:
         if   status == "PASS": pass_c += 1
         elif status == "FAIL": fail_c += 1
         else:                  skip_c += 1
