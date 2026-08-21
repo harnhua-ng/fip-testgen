@@ -445,6 +445,63 @@ def _print_group_summary(tg_id, tc_ids, failures):
     print("=" * res_W)
 
 
+# ─── failure labelling ───────────────────────────────────────────────────────
+
+_LABELS = {"1": "Confirmed", "2": "Assumed", "3": "Flagged",
+           "c": "Confirmed", "a": "Assumed",  "f": "Flagged"}
+
+
+def _prompt_failure_label(tc_id):
+    """Interactively prompt for a failure label and an optional note.
+
+    Returns (label, note).  Falls back to "Assumed" / "" when stdin is not a
+    terminal (e.g. CI pipelines).
+    """
+    if not sys.stdin.isatty():
+        return "Assumed", ""
+    print(f"\n  TC-{tc_id} FAILED — assign a label:")
+    print("    [1] Confirmed  External evidence backs up what we see")
+    print("    [2] Assumed    Nothing contradicts it; taken as truth for now")
+    print("    [3] Flagged    Unusual or suspicious; needs more investigation")
+    while True:
+        try:
+            choice = input("  Choice (1/2/3): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return "Assumed", ""
+        label = _LABELS.get(choice)
+        if label:
+            break
+        print("  Invalid choice — enter 1, 2, or 3.")
+    try:
+        note = input("  Note (optional, press Enter to skip): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        note = ""
+    return label, note
+
+
+def _append_failure_summary(run_ts, target, entries):
+    """Append a labeled failure block to results/failure_log.md.
+
+    run_ts  — ISO-style datetime string for this run
+    target  — "TC-XX-YY" or "TG-XX"
+    entries — list of (tc_id, label, note)
+    """
+    summary_path = os.path.join(REPO_ROOT, "results", "failure_log.md")
+    os.makedirs(os.path.dirname(summary_path), exist_ok=True)
+    write_header = not os.path.isfile(summary_path)
+    with open(summary_path, "a") as fh:
+        if write_header:
+            fh.write("# Failure Log\n")
+        fh.write(f"\n## {run_ts}  [{target}]\n")
+        fh.write("| TC | Label | Note |\n")
+        fh.write("|---|---|---|\n")
+        for tc_id, label, note in entries:
+            fh.write(f"| TC-{tc_id} | {label} | {note} |\n")
+    print(f"\n  Failure summary appended → results/failure_log.md")
+
+
 # ─── parsing ─────────────────────────────────────────────────────────────────
 
 def _strip_prefix(s, prefix):
@@ -478,6 +535,8 @@ def main():
         sys.exit("Unrecognised argument: " + repr(sys.argv[1]) +
                  "\nExpected TC-XX-YY or TG-XX")
 
+    run_ts = time.strftime("%Y-%m-%d %H:%M")
+
     if kind == "tc":
         if ident not in TC_MAP:
             sys.exit("Unknown test case: TC-" + ident +
@@ -485,7 +544,11 @@ def main():
         tc = TC_MAP[ident]
         if tc.note:
             print("NOTE  TC-" + ident + ": " + tc.note)
-        sys.exit(run_sim(ident, tc))
+        rc = run_sim(ident, tc)
+        if rc != 0:
+            label, note = _prompt_failure_label(ident)
+            _append_failure_summary(run_ts, "TC-" + ident, [(ident, label, note)])
+        sys.exit(rc)
 
     else:  # tg
         if ident not in TG_MAP:
@@ -506,6 +569,11 @@ def main():
 
         _print_group_summary(ident, tc_ids, set(failures))
         if failures:
+            entries = []
+            for tc_id in failures:
+                label, note = _prompt_failure_label(tc_id)
+                entries.append((tc_id, label, note))
+            _append_failure_summary(run_ts, "TG-" + ident, entries)
             sys.exit(1)
 
 
