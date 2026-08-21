@@ -78,11 +78,10 @@ The approach is actually similar to standard **UVM (Universal Verification Metho
 
 ## Debugging Map for Each Test
 
-| Python Code | Verilog Trace | Cycle-by-cycle Matrix |
-| :--- | :--- | :--- |
-| [Python cocotb test](#python-cocotb-test) | [Verilog Trace](#corresponding-verilog-trace) | [Cycle-by-cycle Matrix](#corresponding-cycle-by-cycle-matrix) |
+| Python Code | Verilog Trace |
+| :--- | :--- |
+| [Python cocotb test](#python-cocotb-test) | [Verilog Trace](#corresponding-verilog-trace) |
 
-Every test run generates a **Cycle-by-cycle Matrix** (`results/<tc_name>_matrix.md`) to provide cycle-by-cycle traces.  
 Example for TC-01-01:
 
 ### Python cocotb Test
@@ -235,45 +234,6 @@ task automatic run_tc_01_01_trace;
 endtask
 ```
 
-### Corresponding Cycle-by-Cycle Matrix
-
-- **Design Under Test**: `lscc_rom` (LIFCL)
-- **Parameters**: `REGMODE=noreg` (LAT=1), `RDATA_WIDTH=36`, `RADDR_DEPTH=512`, `RESETMODE=sync`, `INIT_MODE=mem_file`
-- **Total Monitored Cycles**: 27
-
-| Time (ns) | Cycle | RST | Enables (E/C/O) | `rd_addr_i` | Latched Addr | `rd_data_o` | Expected (`REF`) | Status |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-|    0.00 | 1 | 1 | E:0 C:0 O:0 | 0x0 | -- | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX | -- | RESET |
-|   10.00 | 2 | 1 | E:0 C:0 O:0 | 0x0 | -- | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX | -- | RESET |
-|   20.00 | 3 | 1 | E:0 C:0 O:0 | 0x0 | -- | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX | -- | RESET |
-|   30.00 | 4 | 1 | E:0 C:0 O:0 | 0x0 | -- | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX | -- | RESET |
-|   40.00 | 5 | 1 | E:0 C:0 O:0 | 0x0 | -- | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX | -- | RESET |
-|   50.00 | 6 | 1 | E:0 C:0 O:0 | 0x0 | -- | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX | -- | RESET |
-|   60.00 | 7 | 1 | E:0 C:0 O:0 | 0x0 | -- | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX | -- | RESET |
-|   70.00 | 8 | 1 | E:0 C:0 O:0 | 0x0 | -- | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX | -- | RESET |
-|   80.00 | 9 | 1 | E:0 C:0 O:0 | 0x0 | -- | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX | -- | RESET |
-|   90.00 | 10 | 1 | E:0 C:0 O:0 | 0x0 | -- | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX | -- | RESET |
-|  100.00 | 11 | 0 | E:1 C:1 O:1 | 0x0 | -- | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX | -- | UNKNOWN |
-|  110.00 | 12 | 0 | E:1 C:1 O:1 | 0x0 | 0x0 | 0x000000000 | 0x000000000 | PASS |
-|  120.00 | 13 | 0 | E:1 C:1 O:1 | 0x1 | 0x0 | 0x000000000 | 0x000000000 | PASS |
-|  130.00 | 14 | 0 | E:1 C:1 O:1 | 0x2 | 0x1 | 0x000000001 | 0x000000001 | PASS |
-|  140.00 | 15 | 0 | E:1 C:1 O:1 | 0x3 | 0x2 | 0x000000002 | 0x000000002 | PASS |
-|  150.00 | 16 | 0 | E:1 C:1 O:1 | 0x4 | 0x3 | 0x000000003 | 0x000000003 | PASS |
-|  160.00 | 17 | 0 | E:1 C:1 O:1 | 0x5 | 0x4 | 0x000000004 | 0x000000004 | PASS |
-|  170.00 | 18 | 0 | E:1 C:1 O:1 | 0x6 | 0x5 | 0x000000005 | 0x000000005 | PASS |
-|  180.00 | 19 | 0 | E:1 C:1 O:1 | 0x7 | 0x6 | 0x000000006 | 0x000000006 | PASS |
-|  190.00 | 20 | 0 | E:1 C:1 O:1 | 0x8 | 0x7 | 0x000000007 | 0x000000007 | PASS |
-|  200.00 | 21 | 0 | E:1 C:1 O:1 | 0x9 | 0x8 | 0x000000008 | 0x000000008 | PASS |
-|  210.00 | 22 | 0 | E:1 C:1 O:1 | 0xA | 0x9 | 0x000000009 | 0x000000009 | PASS |
-|  220.00 | 23 | 0 | E:1 C:1 O:1 | 0xB | 0xA | 0x00000000A | 0x00000000A | PASS |
-|  230.00 | 24 | 0 | E:1 C:1 O:1 | 0xC | 0xB | 0x00000000B | 0x00000000B | PASS |
-|  240.00 | 25 | 0 | E:1 C:1 O:1 | 0xD | 0xC | 0x00000000C | 0x00000000C | PASS |
-|  250.00 | 26 | 0 | E:1 C:1 O:1 | 0xE | 0xD | 0x00000000D | 0x00000000D | PASS |
-|  260.00 | 27 | 0 | E:1 C:1 O:1 | 0xF | 0xE | 0x00000000E | 0x00000000E | PASS |
-
-* **Enables**: `E` = `rd_en_i`, `C` = `rd_clk_en_i`, `O` = `rd_out_clk_en_i`.
-* **Latched Addr**: The address currently emerging at the output stage given the configuration's pipeline latency (`LAT=1` for `noreg`, `LAT=2` for `reg`).
-
 ---
 
 ## Test Execution
@@ -326,16 +286,15 @@ The `Makefile` resolves environment settings using a **3-tier precedence hierarc
 
 #### Flow Selection (`FLOW` variable)
 
-The Makefile supports two simulation flows, selectable via `FLOW=`:
+The Makefile supports one simulation flow, selectable via `FLOW=`:
 
 | `FLOW` | Description |
 | :--- | :--- |
 | `cocotb` (default) | Python co-simulation via Cocotb VPI; test functions run from `src/tb_rom.py`. |
-| `rtl` | Direct Verilog-only simulation using `testbench/tb_rom.v`; no Python involved. |
 
 ```bash
-make tc-01-01 FLOW=cocotb   # default
-make tc-01-01 FLOW=rtl      # pure-Verilog testbench
+make tc-01-01               # defaults to cocotb
+make tc-01-01 FLOW=cocotb   # same as the case where FLOW is not specified.
 ```
 
 ---
@@ -592,13 +551,11 @@ The testplan (`docs/ROM_LIFCL_testplan.md`) is the final authority on expected b
 
 ## RTL Debugging Guide: Step-by-Step
 
-When a test fails, use this 3-step triage workflow:
+When a test fails, use this triage workflow:
 
-1. **Check the Cycle-by-cycle Matrix**:
-   Open `results/tc-XX-YY_matrix.md`. Look for rows marked with **`MISMATCH`** to see the exact simulation timestamp, the address in flight, and the expected vs. sampled data.
-2. **Review the Plain-Text Log**:
+1. **Review the Plain-Text Log**:
    Inspect `results/tc-XX-YY.log` for simulator warnings, EBR primitive configuration messages, or assertion failures.
-3. **Open the Waveform in QuestaSim**:
+2. **Open the Waveform or Simulation in QuestaSim**:
    ```bash
    vsim -view results/tc-01-01.wlf
    ```
