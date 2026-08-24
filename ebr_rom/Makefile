@@ -193,7 +193,7 @@ clean::
 	rm -rf qrun.out
 	rm -rf sim_build
 	rm -f  transcript modelsim.ini
-	find $(CURDIR)/src $(CURDIR)/scripts -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	find $(CURDIR)/src $(CURDIR)/../scripts -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
 # ==============================================================================
 # all_configs — run every required parameter combination in sequence
@@ -477,7 +477,7 @@ all_configs: $(ALL_CONFIGS) $(ALL_SPECIAL_CONFIGS)
 #   make summary MD=1       — also writes results/summary.md
 .PHONY: summary
 summary:
-	@python3 scripts/summarize.py $(if $(MD),$(RESULTS_DIR)/summary.md)
+	@python3 $(CURDIR)/../scripts/summarize.py $(if $(MD),$(RESULTS_DIR)/summary.md)
 
 # ── drc ───────────────────────────────────────────────────────────────────────
 # TG-10: DRC and Parameter Validation tests.
@@ -502,7 +502,7 @@ drc:
 # and writes its log to results/tc-XX-YY.log.
 # Each tg-XX target runs its TCs in sequence and reports a pass/fail summary.
 tc-%:
-	@python3 $(CURDIR)/scripts/run_tc.py tc-$*
+	@IP_ROOT=$(CURDIR) python3 $(CURDIR)/../scripts/run_tc.py tc-$*
 
 tg-%:
-	@python3 $(CURDIR)/scripts/run_tc.py tg-$*
+	@IP_ROOT=$(CURDIR) python3 $(CURDIR)/../scripts/run_tc.py tg-$*

@@ -21,7 +21,7 @@ import time
 import subprocess
 from dataclasses import dataclass
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO_ROOT = os.environ.get("IP_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Ensure local .venv is in PATH if present (prepend so it takes precedence)
 for _vbin in [os.path.join(REPO_ROOT, ".venv", "bin"), os.path.join(REPO_ROOT, ".venv", "Scripts")]:
