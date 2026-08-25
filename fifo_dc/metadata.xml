@@ -1,0 +1,487 @@
+<?xml version="1.0"?>
+<lsccip:ip version="1.0"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns:lsccip="http://www.latticesemi.com/XMLSchema/Radiant/ip">
+
+  <lsccip:general>
+    <lsccip:vendor>latticesemi.com</lsccip:vendor>
+    <lsccip:library>module</lsccip:library>
+    <lsccip:name>fifo_dc</lsccip:name>
+    <lsccip:display_name>FIFO_DC</lsccip:display_name>
+    <lsccip:version>2.7.2</lsccip:version>
+    <lsccip:category>Memory_Modules</lsccip:category>
+    <lsccip:min_radiant_version>3.2</lsccip:min_radiant_version>
+    <lsccip:min_esi_version>2.2</lsccip:min_esi_version>
+    <lsccip:supported_products>
+	<lsccip:supported_family name="LN2-CT"></lsccip:supported_family>
+    <lsccip:supported_family name="LN2-MH"></lsccip:supported_family>
+    <lsccip:supported_family name="LKH-CT"></lsccip:supported_family>
+    <lsccip:supported_family name="LKH-MH"></lsccip:supported_family>
+    <lsccip:supported_family name="LATG1"></lsccip:supported_family>
+    <lsccip:supported_family name="LAV-AT"></lsccip:supported_family>
+    <lsccip:supported_family name="LIFCL"></lsccip:supported_family>
+    <lsccip:supported_family name="LFD2NX"></lsccip:supported_family>
+    <lsccip:supported_family name="LFCPNX"></lsccip:supported_family>
+    <lsccip:supported_family name="LFMXO5"></lsccip:supported_family>
+    <lsccip:supported_family name="UT24C"></lsccip:supported_family>
+    <lsccip:supported_family name="UT24CP"></lsccip:supported_family>
+    <lsccip:supported_family name="kr6a00"></lsccip:supported_family>
+    <lsccip:supported_family name="iCE40UP"></lsccip:supported_family>
+    </lsccip:supported_products>
+    <lsccip:supported_platforms>
+      <lsccip:supported_platform name="esi" />
+      <lsccip:supported_platform name="radiant" />
+    </lsccip:supported_platforms>
+  </lsccip:general>
+
+  <lsccip:settings>
+    <lsccip:setting id                 = "WADDR_DEPTH"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "int"
+                    default            = "512"
+                    title              = "Write Port : Address Depth   "
+                    value_range        = "(2,getDepthLimit(T_FAMILY, FORCE_FAST_CONTROLLER))"
+                    drc                = "check_addr_depth_data_width(WADDR_DEPTH,RADDR_DEPTH,WDATA_WIDTH,RDATA_WIDTH, T_FAMILY, 'W', FIFO_CONTROLLER, FORCE_FAST_CONTROLLER)"
+                    group1             = " Configuration"
+    />
+
+    <lsccip:setting id                 = "WDATA_WIDTH"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "int"
+                    default            = "18"
+                    title              = "Write Port : Data Width         "
+                    value_range        = "(1,256)"
+                    group1             = " Configuration"
+    />
+
+    <lsccip:setting id                 = "RADDR_DEPTH"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "int"
+                    default            = "512"
+                    title              = "Read Port : Address Depth   "
+                    value_range        = "(2,getDepthLimit(T_FAMILY, FORCE_FAST_CONTROLLER))"
+                    drc                = "check_addr_depth_data_width(WADDR_DEPTH,RADDR_DEPTH,WDATA_WIDTH,RDATA_WIDTH, T_FAMILY, 'R', FIFO_CONTROLLER, FORCE_FAST_CONTROLLER)"
+                    group1             = " Configuration"
+    />
+
+    <lsccip:setting id                 = "RDATA_WIDTH"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "int"
+                    default            = "18"
+                    title              = "Read Port : Data Width         "
+                    value_range        = "(1,256)"
+                    group1             = " Configuration"
+    />
+
+    <lsccip:setting id                 = "FIFO_CONTROLLER"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "string"
+                    default            = "'HARD_IP' if (runtime_info.device_info.device(1) != 'LAV-AT-E30B' and runtime_info.device_info.device(1) != 'LAV-AT-E70B') else 'FABRIC'"
+                    value_expr         = "'HARD_IP' if((T_FAMILY == 'LIFCL' or T_FAMILY == 'LATG1' or T_FAMILY == 'LAV-AT') and (runtime_info.device_info.device(1) != 'LAV-AT-E30B' and runtime_info.device_info.device(1) != 'LAV-AT-E70B')) else 'FABRIC'"
+                    title              = "Controller Implementation"
+                    hidden             = "not(T_FAMILY == 'LIFCL' or T_FAMILY == 'LATG1' or T_FAMILY == 'LAV-AT')"
+                    editable           = "(T_FAMILY == 'LIFCL' or T_FAMILY == 'LATG1' or T_FAMILY == 'LAV-AT') and (runtime_info.device_info.device(1) != 'LAV-AT-E30B' and runtime_info.device_info.device(1) != 'LAV-AT-E70B')"
+                    options            = "[('Feature-Rich (LUT)', 'FABRIC'),('Area-Optimized (HW)', 'HARD_IP')] if (runtime_info.device_info.device(1) != 'LAV-AT-E30B' and runtime_info.device_info.device(1) != 'LAV-AT-E70B') else [('Feature-Rich (LUT)', 'FABRIC')]"
+                    group1             = " Configuration"
+    />
+
+    <lsccip:setting id                 = "FWFT"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "bool"
+                    default            = "False"
+                    title              = "Enable FWFT"
+                    group1             = " Configuration"
+    />
+
+    <lsccip:setting id                 = "FORCE_FAST_CONTROLLER"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "bool"
+                    default            = "False"
+                    title              = "Use HI-SPEED Implementation"
+                    hidden             = "T_FAMILY != 'LIFCL'"
+                    editable           = "FIFO_CONTROLLER == 'HARD_IP'"
+                    group1             = " Configuration"
+    />
+
+    <lsccip:setting id                 = "IMPLEMENTATION"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "string"
+                    default            = "EBR"
+                    title              = "Implementation Type      "
+                    options            = "['EBR','LUT']"
+                    group1             = " Configuration"
+                    editable           = "FIFO_CONTROLLER == 'FABRIC'"
+                    drc                = "check_mem_implementation(IMPLEMENTATION, WADDR_DEPTH, RADDR_DEPTH, WDATA_WIDTH, RDATA_WIDTH)"
+    />
+
+    <lsccip:setting id                 = "Total Memory bits"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "input"
+                    value_type         = "string"
+                    editable           = "0"
+                    value_expr         = "(WADDR_DEPTH * WDATA_WIDTH)"
+                    group1             = " Configuration"
+    />
+
+    <lsccip:setting id                 = "WADDR_WIDTH"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "int"
+                    value_expr         = "clog2(WADDR_DEPTH)"
+                    editable           = "0"
+                    hidden             = "True"
+    />
+  
+    <lsccip:setting id                 = "RADDR_WIDTH"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "int"
+                    value_expr         = "clog2(RADDR_DEPTH)"
+                    editable           = "0"
+                    hidden             = "True"
+    />
+  
+    <lsccip:setting id                 = "REGMODE"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "bool"
+                    default            = "True"
+                    title              = "Enable Output Register      "
+                    bool_value_mapping = "['reg','noreg']"
+                    group1             = " Configuration"
+    />
+
+    <lsccip:setting id                 = "OREG_IMPLEMENTATION"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "string"
+                    default            = "LUT"
+                    title              = "    Output Register Implementation"
+                    hidden             = "True"
+                    options            = "['LUT','EBR']"
+                    group1             = " Configuration"
+    />
+
+    <lsccip:setting id                 = "RESETMODE"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "string"
+                    default            = "async"
+                    title              = "Reset Mode      "
+                    options            = "['async','sync']"
+                    group1             = " Configuration"
+    />
+  
+    <lsccip:setting id                 = "ENABLE_ALMOST_FULL_FLAG"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "bool"
+                    default            = "TRUE"
+                    title              = "Enable ALMOST FULL flag      "
+                    bool_value_mapping = "['TRUE','FALSE']"
+                    group1             = " Configuration"
+    />
+  
+    <lsccip:setting id                 = "ALMOST_FULL_ASSERTION"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "string"
+                    default            = "static-dual"
+                    title              = "   ALMOST FULL assertion type      "
+                    options            = "[('Static - Single Threshold', 'static-single'),('Static - Dual Threshold', 'static-dual'), ('Dynamic - Single Threshold', 'dynamic-single'),('Dynamic - Dual Threshold', 'dynamic-dual')]"
+                    editable           = "(ENABLE_ALMOST_FULL_FLAG == 1 and FIFO_CONTROLLER == 'FABRIC')"
+                    value_expr         = "'static-single' if(FIFO_CONTROLLER == 'HARD_IP') else 'static-dual'"
+                    group1             = " Configuration"
+    />
+  
+    <lsccip:setting id                 = "ALMOST_FULL_ASSERT_LVL"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "int"
+                    default            = "511"
+                    title              = "    Assert LEVEL:  "
+                    value_range        = "(1, WADDR_DEPTH-1)"
+                    value_expr         = "getLoop(WADDR_DEPTH, WADDR_DEPTH-1)"
+                    editable           = "check_assert_required(ENABLE_ALMOST_FULL_FLAG, ALMOST_FULL_ASSERTION)"
+                    group1             = " Configuration"
+    />
+  
+    <lsccip:setting id                 = "ALMOST_FULL_DEASSERT_LVL"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "int"
+                    default            = "508"
+                    title              = "    Deassert LEVEL:  "
+                    value_range        = "(1,reduce_depth_ret(WADDR_DEPTH, ALMOST_FULL_ASSERT_LVL-1))"
+                    value_expr         = "getLoop(WADDR_DEPTH, ALMOST_FULL_ASSERT_LVL-1)"
+                    editable           = "check_deassert_required(ENABLE_ALMOST_FULL_FLAG, ALMOST_FULL_ASSERTION)"
+                    group1             = " Configuration"
+    />
+  
+    <lsccip:setting id                 = "CHECK_ASSERT_DEASSERT_FULL_LVL"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "input"
+                    value_type         = "string"
+                    drc                = "check_if_full_lvl_valid(ALMOST_FULL_ASSERT_LVL, ALMOST_FULL_DEASSERT_LVL, ENABLE_ALMOST_FULL_FLAG, ALMOST_FULL_ASSERTION, WADDR_DEPTH)"
+                    group1             = " Configuration"
+                    editable           = "0"
+    />
+  
+    <lsccip:setting id                 = "ENABLE_ALMOST_EMPTY_FLAG"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "bool"
+                    default            = "TRUE"
+                    title              = "Enable ALMOST EMPTY flag      "
+                    bool_value_mapping = "['TRUE','FALSE']"
+                    group1             = " Configuration"
+    />
+  
+    <lsccip:setting id                 = "ALMOST_EMPTY_ASSERTION"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "string"
+                    default            = "static-dual"
+                    title              = "   ALMOST EMPTY assertion type      "
+                    options            = "[('Static - Single Threshold', 'static-single'),('Static - Dual Threshold', 'static-dual'), ('Dynamic - Single Threshold', 'dynamic-single'),('Dynamic - Dual Threshold', 'dynamic-dual')]"
+                    editable           = "(ENABLE_ALMOST_EMPTY_FLAG == 1 and FIFO_CONTROLLER == 'FABRIC')"
+                    value_expr         = "'static-single' if(FIFO_CONTROLLER == 'HARD_IP') else 'static-dual'"
+                    group1             = " Configuration"
+    />
+  
+    <lsccip:setting id                 = "ALMOST_EMPTY_ASSERT_LVL"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "int"
+                    default            = "1"
+                    title              = "    Assert LEVEL  "
+                    value_range        = "(1,RADDR_DEPTH-1)"
+                    value_expr         = "getLoop(RADDR_DEPTH, 1)"
+                    editable           = "check_assert_required(ENABLE_ALMOST_EMPTY_FLAG, ALMOST_EMPTY_ASSERTION)"
+                    group1             = " Configuration"
+    />
+  
+    <lsccip:setting id                 = "ALMOST_EMPTY_DEASSERT_LVL"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "int"
+                    default            = "4"
+                    title              = "    Deassert LEVEL"
+                    value_range        = "(reduce_depth_ret(RADDR_DEPTH, ALMOST_EMPTY_ASSERT_LVL+1), RADDR_DEPTH-1)"
+                    value_expr         = "getLoop(RADDR_DEPTH, ALMOST_EMPTY_ASSERT_LVL+1)"
+                    editable           = "check_deassert_required(ENABLE_ALMOST_EMPTY_FLAG, ALMOST_EMPTY_ASSERTION)"
+                    group1             = " Configuration"
+    />
+  
+    <lsccip:setting id                 = "CHECK_ASSERT_DEASSERT_EMPTY_LVL"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "input"
+                    value_type         = "string"
+                    drc                = "check_if_empty_lvl_valid(ALMOST_EMPTY_ASSERT_LVL, ALMOST_EMPTY_DEASSERT_LVL, ENABLE_ALMOST_EMPTY_FLAG, ALMOST_EMPTY_ASSERTION, RADDR_DEPTH)"
+                    group1             = " Configuration"
+                    editable           = "0"
+    />
+
+    <lsccip:setting id                 = "ENABLE_DATA_COUNT_WR"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "bool"
+                    default            = "FALSE"
+                    title              = "Enable Data Count (Write)"
+                    bool_value_mapping = "['TRUE','FALSE']"
+                    editable           = "(FIFO_CONTROLLER == 'FABRIC')"
+                    group1             = " Configuration"
+    />
+  
+    <lsccip:setting id                 = "ENABLE_DATA_COUNT_RD"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "bool"
+                    default            = "FALSE"
+                    title              = "Enable Data Count (Read)"
+                    bool_value_mapping = "['TRUE','FALSE']"
+                    editable           = "(FIFO_CONTROLLER == 'FABRIC')"
+                    group1             = " Configuration"
+    />
+
+    <lsccip:setting id                 = "FAMILY"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "param"
+                    value_type         = "string"
+                    group1             = " Initialization"
+                    title              = "Device Architecture"
+                    value_expr         = "get_device_name(1)"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "T_FAMILY"
+                    conn_mod           = "lscc_fifo_dc"
+                    type               = "input"
+                    value_type         = "string"
+                    group1             = " Initialization"
+                    title              = "Device Architecture"
+                    value_expr         = "get_tdevice_name(FAMILY)"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+  
+  </lsccip:settings>
+
+  <lsccip:ports>
+    <lsccip:port name       = "wr_clk_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_fifo_dc"
+                 conn_port  = "wr_clk_i"
+    />
+
+    <lsccip:port name       = "rd_clk_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_fifo_dc"
+                 conn_port  = "rd_clk_i"
+    />
+  
+    <lsccip:port name       = "rst_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_fifo_dc"
+                 conn_port  = "rst_i"
+    />
+
+    <lsccip:port name       = "rp_rst_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_fifo_dc"
+                 conn_port  = "rp_rst_i"
+    />
+  
+    <lsccip:port name       = "wr_en_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_fifo_dc"
+                 conn_port  = "wr_en_i"
+    />
+  
+    <lsccip:port name       = "rd_en_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_fifo_dc"
+                 conn_port  = "rd_en_i"
+    />
+
+    <lsccip:port name       = "wr_data_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_fifo_dc"
+                 conn_port  = "wr_data_i"
+                 range      = "((WDATA_WIDTH-1), 0)"
+    />
+
+    <lsccip:port name       = "almost_full_th_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_fifo_dc"
+                 conn_port  = "almost_full_th_i"
+                 range      = "((WADDR_WIDTH-1), 0)"
+                 stick_high = "check_assert_dynamic_required(ENABLE_ALMOST_FULL_FLAG, ALMOST_FULL_ASSERTION)"
+    />
+  
+    <lsccip:port name       = "almost_full_clr_th_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_fifo_dc"
+                 conn_port  = "almost_full_clr_th_i"
+                 range      = "((WADDR_WIDTH-1), 0)"
+                 stick_high = "check_deassert_dynamic_required(ENABLE_ALMOST_FULL_FLAG, ALMOST_FULL_ASSERTION)"
+    />
+
+    <lsccip:port name       = "almost_empty_th_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_fifo_dc"
+                 conn_port  = "almost_empty_th_i"
+                 range      = "((RADDR_WIDTH-1), 0)"
+                 stick_high = "check_assert_dynamic_required(ENABLE_ALMOST_EMPTY_FLAG, ALMOST_EMPTY_ASSERTION)"
+    />
+  
+    <lsccip:port name       = "almost_empty_clr_th_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_fifo_dc"
+                 conn_port  = "almost_empty_clr_th_i"
+                 range      = "((RADDR_WIDTH-1), 0)"
+                 stick_high = "check_deassert_dynamic_required(ENABLE_ALMOST_EMPTY_FLAG, ALMOST_EMPTY_ASSERTION)"
+    />
+  
+    <lsccip:port name       = "full_o"
+                 dir        = "out"
+                 conn_mod   = "lscc_fifo_dc"
+                 conn_port  = "full_o"
+    />
+  
+    <lsccip:port name       = "empty_o"
+                 dir        = "out"
+                 conn_mod   = "lscc_fifo_dc"
+                 conn_port  = "empty_o"
+    />
+  
+    <lsccip:port name       = "almost_full_o"
+                 dir        = "out"
+                 conn_mod   = "lscc_fifo_dc"
+                 conn_port  = "almost_full_o"
+                 dangling   = "check_flag(ENABLE_ALMOST_FULL_FLAG)"
+    />
+  
+    <lsccip:port name       = "almost_empty_o"
+                 dir        = "out"
+                 conn_mod   = "lscc_fifo_dc"
+                 conn_port  = "almost_empty_o"
+                 dangling   = "check_flag(ENABLE_ALMOST_EMPTY_FLAG)"
+    />
+  
+    <lsccip:port name       = "wr_data_cnt_o"
+                 dir        = "out"
+                 conn_mod   = "lscc_fifo_dc"
+                 conn_port  = "wr_data_cnt_o"
+                 range      = "(WADDR_WIDTH, 0)"
+                 dangling   = "check_flag(ENABLE_DATA_COUNT_WR)"
+    />
+  
+    <lsccip:port name       = "rd_data_cnt_o"
+                 dir        = "out"
+                 conn_mod   = "lscc_fifo_dc"
+                 conn_port  = "rd_data_cnt_o"
+                 range      = "(RADDR_WIDTH, 0)"
+                 dangling   = "check_flag(ENABLE_DATA_COUNT_RD)"
+    />
+
+    <lsccip:port name       = "rd_data_o"
+                 dir        = "out"
+                 conn_mod   = "lscc_fifo_dc"
+                 conn_port  = "rd_data_o"
+                 range      = "((RDATA_WIDTH-1), 0)"
+    />
+
+    <lsccip:port name       = "one_err_det_o"
+                 dir        = "out"
+                 conn_mod   = "lscc_fifo_dc"
+                 conn_port  = "one_err_det_o"
+                 dangling   = "True"
+    />
+
+    <lsccip:port name       = "two_err_det_o"
+                 dir        = "out"
+                 conn_mod   = "lscc_fifo_dc"
+                 conn_port  = "two_err_det_o"
+                 dangling   = "True"
+    />
+
+  </lsccip:ports>
+  
+  <lsccip:componentGenerators>
+    <lsccip:componentGenerator>
+        <lsccip:name>create_constraint_pdc</lsccip:name>
+        <lsccip:generatorExe>eval/create_constraint.py</lsccip:generatorExe>
+    </lsccip:componentGenerator>
+  </lsccip:componentGenerators>
+  
+</lsccip:ip>
