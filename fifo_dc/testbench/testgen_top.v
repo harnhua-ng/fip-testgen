@@ -1,0 +1,116 @@
+`timescale 1ns/1ps
+// Simulation wrapper for lscc_fifo_dc CoCoTB testbench.
+// Provides GSR_INST at the top level (required by LIFCL primitives)
+// and exposes all DUT ports and parameters for cocotb to drive.
+
+module testgen_top #(
+    parameter IMPLEMENTATION            = "EBR",
+    parameter WADDR_DEPTH               = 512,
+    parameter WADDR_WIDTH               = 9,
+    parameter WDATA_WIDTH               = 36,
+    parameter RADDR_DEPTH               = 512,
+    parameter RADDR_WIDTH               = 9,
+    parameter RDATA_WIDTH               = 36,
+    parameter REGMODE                   = "reg",
+    parameter OREG_IMPLEMENTATION       = "LUT",
+    parameter RESETMODE                 = "async",
+    parameter ENABLE_ALMOST_FULL_FLAG   = "TRUE",
+    parameter ENABLE_ALMOST_EMPTY_FLAG  = "TRUE",
+    parameter INIT_FILE                 = "none",
+    parameter INIT_MODE                 = "none",
+    parameter INIT_FILE_FORMAT          = "binary",
+    parameter ALMOST_FULL_ASSERTION     = "static-dual",
+    parameter ALMOST_FULL_ASSERT_LVL    = 511,
+    parameter ALMOST_FULL_DEASSERT_LVL  = 510,
+    parameter ALMOST_EMPTY_ASSERTION    = "static-dual",
+    parameter ALMOST_EMPTY_ASSERT_LVL   = 1,
+    parameter ALMOST_EMPTY_DEASSERT_LVL = 2,
+    parameter ECC_ENABLE                = 0,
+    parameter ENABLE_DATA_COUNT_WR      = "FALSE",
+    parameter ENABLE_DATA_COUNT_RD      = "FALSE",
+    parameter FAMILY                    = "LIFCL",
+    parameter FIFO_CONTROLLER           = "FABRIC",
+    parameter FORCE_FAST_CONTROLLER     = 0,
+    parameter FWFT                      = 0
+) (
+    input  wire                            wr_clk_i,
+    input  wire                            rd_clk_i,
+    input  wire [WDATA_WIDTH-1:0]          wr_data_i,
+    input  wire                            wr_en_i,
+    input  wire                            rd_en_i,
+    input  wire                            rst_i,
+    input  wire                            rp_rst_i,
+
+    input  wire [WADDR_WIDTH-1:0]          almost_full_th_i,
+    input  wire [WADDR_WIDTH-1:0]          almost_full_clr_th_i,
+    input  wire [RADDR_WIDTH-1:0]          almost_empty_th_i,
+    input  wire [RADDR_WIDTH-1:0]          almost_empty_clr_th_i,
+
+    output wire [RDATA_WIDTH-1:0]          rd_data_o,
+    output wire                            full_o,
+    output wire                            empty_o,
+    output wire                            almost_full_o,
+    output wire                            almost_empty_o,
+    output wire [WADDR_WIDTH:0]            wr_data_cnt_o,
+    output wire [RADDR_WIDTH:0]            rd_data_cnt_o,
+    output wire                            one_err_det_o,
+    output wire                            two_err_det_o
+);
+
+    // GSR_N=1 keeps global set/reset de-asserted; CLK=0 is unused on LIFCL.
+    // Required by LIFCL EBR / FIFO primitives.
+    GSR GSR_INST (.GSR_N(1'b1), .CLK(1'b0));
+
+    lscc_fifo_dc #(
+        .IMPLEMENTATION            (IMPLEMENTATION),
+        .WADDR_DEPTH               (WADDR_DEPTH),
+        .WADDR_WIDTH               (WADDR_WIDTH),
+        .WDATA_WIDTH               (WDATA_WIDTH),
+        .RADDR_DEPTH               (RADDR_DEPTH),
+        .RADDR_WIDTH               (RADDR_WIDTH),
+        .RDATA_WIDTH               (RDATA_WIDTH),
+        .REGMODE                   (REGMODE),
+        .OREG_IMPLEMENTATION       (OREG_IMPLEMENTATION),
+        .RESETMODE                 (RESETMODE),
+        .ENABLE_ALMOST_FULL_FLAG   (ENABLE_ALMOST_FULL_FLAG),
+        .ENABLE_ALMOST_EMPTY_FLAG  (ENABLE_ALMOST_EMPTY_FLAG),
+        .INIT_FILE                 (INIT_FILE),
+        .INIT_MODE                 (INIT_MODE),
+        .INIT_FILE_FORMAT          (INIT_FILE_FORMAT),
+        .ALMOST_FULL_ASSERTION     (ALMOST_FULL_ASSERTION),
+        .ALMOST_FULL_ASSERT_LVL    (ALMOST_FULL_ASSERT_LVL),
+        .ALMOST_FULL_DEASSERT_LVL  (ALMOST_FULL_DEASSERT_LVL),
+        .ALMOST_EMPTY_ASSERTION    (ALMOST_EMPTY_ASSERTION),
+        .ALMOST_EMPTY_ASSERT_LVL   (ALMOST_EMPTY_ASSERT_LVL),
+        .ALMOST_EMPTY_DEASSERT_LVL (ALMOST_EMPTY_DEASSERT_LVL),
+        .ECC_ENABLE                (ECC_ENABLE),
+        .ENABLE_DATA_COUNT_WR      (ENABLE_DATA_COUNT_WR),
+        .ENABLE_DATA_COUNT_RD      (ENABLE_DATA_COUNT_RD),
+        .FAMILY                    (FAMILY),
+        .FIFO_CONTROLLER           (FIFO_CONTROLLER),
+        .FORCE_FAST_CONTROLLER     (FORCE_FAST_CONTROLLER),
+        .FWFT                      (FWFT)
+    ) u_fifo_dc (
+        .wr_clk_i                  (wr_clk_i),
+        .rd_clk_i                  (rd_clk_i),
+        .wr_data_i                 (wr_data_i),
+        .wr_en_i                   (wr_en_i),
+        .rd_en_i                   (rd_en_i),
+        .rst_i                     (rst_i),
+        .rp_rst_i                  (rp_rst_i),
+        .almost_full_th_i          (almost_full_th_i),
+        .almost_full_clr_th_i      (almost_full_clr_th_i),
+        .almost_empty_th_i         (almost_empty_th_i),
+        .almost_empty_clr_th_i     (almost_empty_clr_th_i),
+        .rd_data_o                 (rd_data_o),
+        .full_o                    (full_o),
+        .empty_o                   (empty_o),
+        .almost_full_o             (almost_full_o),
+        .almost_empty_o            (almost_empty_o),
+        .wr_data_cnt_o             (wr_data_cnt_o),
+        .rd_data_cnt_o             (rd_data_cnt_o),
+        .one_err_det_o             (one_err_det_o),
+        .two_err_det_o             (two_err_det_o)
+    );
+
+endmodule
