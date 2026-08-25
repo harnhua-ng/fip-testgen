@@ -1,0 +1,177 @@
+<lsccip:busInterfaces xmlns:lsccip="http://www.latticesemi.com/XMLSchema/Radiant/ip">
+    <!-- APB Slave Bus Interface -->
+    <lsccip:busInterface>
+        <lsccip:name>APB_SLV</lsccip:name>
+        <lsccip:displayName>APB_SLV</lsccip:displayName>
+        <lsccip:description>APB slave port</lsccip:description>
+        <lsccip:busType library="AMBA3" name="APB" vendor="amba.com" version="r1p0"/>
+        <lsccip:abstractionTypes>
+            <lsccip:abstractionType>
+                <lsccip:abstractionRef library="AMBA3" name="APB_rtl" vendor="amba.com" version="r1p0"/>
+                <lsccip:portMaps>
+                    <lsccip:portMap>
+                        <lsccip:logicalPort>
+                            <lsccip:name>PSELx</lsccip:name>
+                        </lsccip:logicalPort>
+                        <lsccip:physicalPort>
+                            <lsccip:name>apb_psel_i</lsccip:name>
+                        </lsccip:physicalPort>
+                    </lsccip:portMap>
+                    <lsccip:portMap>
+                        <lsccip:logicalPort>
+                            <lsccip:name>PADDR</lsccip:name>
+                        </lsccip:logicalPort>
+                        <lsccip:physicalPort>
+                            <lsccip:name>apb_paddr_i</lsccip:name>
+                        </lsccip:physicalPort>
+                    </lsccip:portMap>
+                    <lsccip:portMap>
+                        <lsccip:logicalPort>
+                            <lsccip:name>PENABLE</lsccip:name>
+                        </lsccip:logicalPort>
+                        <lsccip:physicalPort>
+                            <lsccip:name>apb_penable_i</lsccip:name>
+                        </lsccip:physicalPort>
+                    </lsccip:portMap>
+                    <lsccip:portMap>
+                        <lsccip:logicalPort>
+                            <lsccip:name>PWDATA</lsccip:name>
+                        </lsccip:logicalPort>
+                        <lsccip:physicalPort>
+                            <lsccip:name>apb_pwdata_i</lsccip:name>
+                        </lsccip:physicalPort>
+                    </lsccip:portMap>
+                    <lsccip:portMap>
+                        <lsccip:logicalPort>
+                            <lsccip:name>PWRITE</lsccip:name>
+                        </lsccip:logicalPort>
+                        <lsccip:physicalPort>
+                            <lsccip:name>apb_pwrite_i</lsccip:name>
+                        </lsccip:physicalPort>
+                    </lsccip:portMap>
+                    <lsccip:portMap>
+                        <lsccip:logicalPort>
+                            <lsccip:name>PREADY</lsccip:name>
+                        </lsccip:logicalPort>
+                        <lsccip:physicalPort>
+                            <lsccip:name>apb_pready_o</lsccip:name>
+                        </lsccip:physicalPort>
+                    </lsccip:portMap>
+                    <lsccip:portMap>
+                        <lsccip:logicalPort>
+                            <lsccip:name>PSLVERR</lsccip:name>
+                        </lsccip:logicalPort>
+                        <lsccip:physicalPort>
+                            <lsccip:name>apb_pslverr_o</lsccip:name>
+                        </lsccip:physicalPort>
+                    </lsccip:portMap>
+                    <lsccip:portMap>
+                        <lsccip:logicalPort>
+                            <lsccip:name>PRDATA</lsccip:name>
+                        </lsccip:logicalPort>
+                        <lsccip:physicalPort>
+                            <lsccip:name>apb_prdata_o</lsccip:name>
+                        </lsccip:physicalPort>
+                    </lsccip:portMap>
+                </lsccip:portMaps>
+            </lsccip:abstractionType>
+        </lsccip:abstractionTypes>
+        <lsccip:slave>
+            <lsccip:memoryMapRef memoryMapRef="pll_mem_map" />
+        </lsccip:slave>
+    </lsccip:busInterface>
+
+
+    <!-- LMMI Slave Interface -->
+    <lsccip:busInterface>
+        <lsccip:name>LMMI_SLV</lsccip:name>
+        <lsccip:displayName>LMMI_SLV</lsccip:displayName>
+        <lsccip:description>LMMI slave port</lsccip:description>
+        <lsccip:busType library="interface" name="lmmi" vendor="latticesemi.com" version="1.0"/>
+        <lsccip:abstractionTypes>
+            <lsccip:abstractionType>
+                <lsccip:abstractionRef library="interface" name="lmmi_rtl" vendor="latticesemi.com" version="1.0"/>
+                <lsccip:portMaps>
+
+                    <lsccip:portMap>
+                        <lsccip:logicalPort>
+                            <lsccip:name>CLK</lsccip:name>
+                        </lsccip:logicalPort>
+                        <lsccip:physicalPort>
+                            <lsccip:name>lmmi_clk_i</lsccip:name>
+                        </lsccip:physicalPort>
+                    </lsccip:portMap>
+                    <lsccip:portMap>
+                        <lsccip:logicalPort>
+                            <lsccip:name>RSTN</lsccip:name>
+                        </lsccip:logicalPort>
+                        <lsccip:physicalPort>
+                            <lsccip:name>lmmi_resetn_i</lsccip:name>
+                        </lsccip:physicalPort>
+                    </lsccip:portMap>
+                    <lsccip:portMap>
+                        <lsccip:logicalPort>
+                            <lsccip:name>REQUEST</lsccip:name>
+                        </lsccip:logicalPort>
+                        <lsccip:physicalPort>
+                            <lsccip:name>lmmi_request_i</lsccip:name>
+                        </lsccip:physicalPort>
+                    </lsccip:portMap>
+                    <lsccip:portMap>
+                        <lsccip:logicalPort>
+                            <lsccip:name>OFFSET</lsccip:name>
+                        </lsccip:logicalPort>
+                        <lsccip:physicalPort>
+                            <lsccip:name>lmmi_offset_i</lsccip:name>
+                        </lsccip:physicalPort>
+                    </lsccip:portMap>
+                    <lsccip:portMap>
+                        <lsccip:logicalPort>
+                            <lsccip:name>WRITE</lsccip:name>
+                        </lsccip:logicalPort>
+                        <lsccip:physicalPort>
+                            <lsccip:name>lmmi_wr_rdn_i</lsccip:name>
+                        </lsccip:physicalPort>
+                    </lsccip:portMap>
+                    <lsccip:portMap>
+                        <lsccip:logicalPort>
+                            <lsccip:name>WDATA</lsccip:name>
+                        </lsccip:logicalPort>
+                        <lsccip:physicalPort>
+                            <lsccip:name>lmmi_wdata_i</lsccip:name>
+                        </lsccip:physicalPort>
+                    </lsccip:portMap>
+                    <lsccip:portMap>
+                        <lsccip:logicalPort>
+                            <lsccip:name>RDATA</lsccip:name>
+                        </lsccip:logicalPort>
+                        <lsccip:physicalPort>
+                            <lsccip:name>lmmi_rdata_o</lsccip:name>
+                        </lsccip:physicalPort>
+                    </lsccip:portMap>
+                    <lsccip:portMap>
+                        <lsccip:logicalPort>
+                            <lsccip:name>RD_VALID</lsccip:name>
+                        </lsccip:logicalPort>
+                        <lsccip:physicalPort>
+                            <lsccip:name>lmmi_rdata_valid_o</lsccip:name>
+                        </lsccip:physicalPort>
+                    </lsccip:portMap>
+                    <lsccip:portMap>
+                        <lsccip:logicalPort>
+                            <lsccip:name>READY</lsccip:name>
+                        </lsccip:logicalPort>
+                        <lsccip:physicalPort>
+                            <lsccip:name>lmmi_ready_o</lsccip:name>
+                        </lsccip:physicalPort>
+                    </lsccip:portMap>
+
+                </lsccip:portMaps>
+            </lsccip:abstractionType>
+        </lsccip:abstractionTypes>
+        <lsccip:slave/>
+    </lsccip:busInterface>
+
+
+</lsccip:busInterfaces>
+

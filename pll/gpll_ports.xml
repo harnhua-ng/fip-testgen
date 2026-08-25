@@ -1,0 +1,339 @@
+<?xml version="1.0" ?>
+<lsccip:ports xmlns:lsccip="http://www.latticesemi.com/XMLSchema/Radiant/ip">
+
+    <!-- General Input signals-->
+    <lsccip:port name       = "clki_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "clki_i"
+    />
+
+    <lsccip:port name       = "usr_fbclk_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "usr_fbclk_i"
+                 stick_low  = "1 if(gpll_param.gui_en_usr_fbk.editopt and gui_en_usr_fbk == False) else
+                               (1 if(not gpll_param.gui_en_usr_fbk.editopt and gpll_param.gui_en_usr_fbk.cal_val == False) else 0)"
+    />
+
+    <lsccip:port name       = "rstn_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "rstn_i"
+                 stick_high = "PLL_RST != True"
+    />
+
+    <lsccip:port name       = "legacy_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "legacy_i"
+                 stick_high = "LEGACY_EN != True"
+    />
+
+    <lsccip:port name       = "pllpd_en_n_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "pllpd_en_n_i"
+                 stick_high = "POWERDOWN_EN != True"
+    />
+
+    <lsccip:port name       = "refdetreset"
+                 dir        = "in"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "refdetreset"
+                 stick_low  = "not EN_REFCLK_MON"
+    />
+
+    <lsccip:port name       = "phasedir_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "phasedir_i"
+                 stick_low  = "DYN_PORTS_EN != True"
+    />
+
+    <lsccip:port name       = "phasestep_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "phasestep_i"
+                 stick_low  = "DYN_PORTS_EN != True"
+    />
+
+    <lsccip:port name       = "phaseloadreg_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "phaseloadreg_i"
+                 stick_low  = "DYN_PORTS_EN != True"
+    />
+
+    <lsccip:port name       = "phasesel_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "phasesel_i"
+                 range      = "(2, 0)"
+                 stick_low  = "DYN_PORTS_EN != True"
+    />
+
+    <lsccip:port name       = "enclkop_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "enclkop_i"
+                 stick_high = "ENCLKOP_EN != True"
+    />
+
+    <lsccip:port name       = "enclkos_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "enclkos_i"
+                 stick_high = "ENCLKOS_EN != True"
+    />
+
+    <lsccip:port name       = "enclkos2_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "enclkos2_i"
+                 stick_high = "ENCLKOS2_EN != True"
+    />
+
+    <lsccip:port name       = "enclkos3_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "enclkos3_i"
+                 stick_high = "ENCLKOS3_EN != True"
+    />
+
+    <lsccip:port name       = "enclkos4_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "enclkos4_i"
+                 stick_high = "ENCLKOS4_EN != True"
+    />
+
+    <lsccip:port name       = "enclkos5_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "enclkos5_i"
+                 stick_high = "ENCLKOS5_EN != True"
+    />
+
+     <!-- General output signals -->
+    <lsccip:port name       = "clkop_o"
+                 dir        = "out"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "clkop_o"
+                 extension  = "clock_param='CLKOP_FREQ_ACTUAL'"
+    />
+
+    <lsccip:port name       = "clkos_o"
+                 dir        = "out"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "clkos_o"
+                 dangling   = "CLKOS_EN == False"
+                 extension  = "clock_param='CLKOS_FREQ_ACTUAL'"
+    />
+
+    <lsccip:port name       = "clkos2_o"
+                 dir        = "out"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "clkos2_o"
+                 dangling   = "CLKOS2_EN == False"
+                 extension  = "clock_param='CLKOS2_FREQ_ACTUAL'"
+    />
+
+    <lsccip:port name       = "clkos3_o"
+                 dir        = "out"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "clkos3_o"
+                 dangling   = "CLKOS3_EN == False"
+                 extension  = "clock_param='CLKOS3_FREQ_ACTUAL'"
+    />
+
+    <lsccip:port name       = "clkos4_o"
+                 dir        = "out"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "clkos4_o"
+                 dangling   = "CLKOS4_EN == False"
+                 extension  = "clock_param='CLKOS4_FREQ_ACTUAL'"
+    />
+
+    <lsccip:port name       = "clkos5_o"
+                 dir        = "out"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "clkos5_o"
+                 dangling   = "CLKOS5_EN == False"
+                 extension  = "clock_param='CLKOS5_FREQ_ACTUAL'"
+    />
+
+    <lsccip:port name       = "lock_o"
+                 dir        = "out"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "lock_o"
+                 dangling   = "LOCK_EN == False"
+    />
+
+    <lsccip:port name       = "refdetlos"
+                 dir        = "out"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "refdetlos"
+                 dangling   = "not EN_REFCLK_MON"
+    />
+
+    <!-- LMMI signals -->
+    <lsccip:port name        = "lmmi_clk_i"
+                 dir         = "in"
+                 conn_mod    = "lscc_pll"
+                 conn_port   = "lmmi_clk_i"
+                 stick_low   = "LMMI_EN != True"
+                 bus_interface = "LMMI_SLV"
+    />
+
+    <lsccip:port name        = "lmmi_resetn_i"
+                 dir         = "in"
+                 conn_mod    = "lscc_pll"
+                 conn_port   = "lmmi_resetn_i"
+                 stick_high  = "LMMI_EN != True"
+                 bus_interface = "LMMI_SLV"
+    />
+
+    <lsccip:port name        = "lmmi_request_i"
+                 dir         = "in"
+                 conn_mod    = "lscc_pll"
+                 conn_port   = "lmmi_request_i"
+                 stick_low   = "LMMI_EN != True"
+                 bus_interface = "LMMI_SLV"
+    />
+
+    <lsccip:port name       = "lmmi_wr_rdn_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "lmmi_wr_rdn_i"
+                 stick_low  = "LMMI_EN != True"
+                 bus_interface = "LMMI_SLV"
+    />
+
+    <lsccip:port name       = "lmmi_offset_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "lmmi_offset_i"
+                 range      = "(6, 0)"
+                 stick_low  = "LMMI_EN != True"
+                 bus_interface = "LMMI_SLV"
+    />
+
+    <lsccip:port name       = "lmmi_wdata_i"
+                 dir        = "in"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "lmmi_wdata_i"
+                 range      = "(7, 0)"
+                 stick_low  = "LMMI_EN != True"
+                 bus_interface = "LMMI_SLV"
+    />
+
+    <lsccip:port name       = "lmmi_rdata_o"
+                 dir        = "out"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "lmmi_rdata_o"
+                 range      = "(7, 0)"
+                 dangling   = "LMMI_EN != True"
+                 bus_interface = "LMMI_SLV"
+    />
+
+    <lsccip:port name       = "lmmi_rdata_valid_o"
+                 dir        = "out"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "lmmi_rdata_valid_o"
+                 dangling   = "LMMI_EN != True"
+                 bus_interface = "LMMI_SLV"
+    />
+
+    <lsccip:port name       = "lmmi_ready_o"
+                 dir        = "out"
+                 conn_mod   = "lscc_pll"
+                 conn_port  = "lmmi_ready_o"
+                 dangling   = "LMMI_EN != True"
+                 bus_interface = "LMMI_SLV"
+    />
+
+    <!-- APB inputs -->
+    <lsccip:port name        = "apb_pclk_i"
+                 dir         = "in"
+                 conn_mod    = "lscc_pll"
+                 conn_port   = "apb_pclk_i"
+                 stick_low   = "APB_EN != True"
+    />
+
+    <lsccip:port name        = "apb_preset_n_i"
+                 dir         = "in"
+                 conn_mod    = "lscc_pll"
+                 conn_port   = "apb_preset_n_i"
+                 stick_high  = "APB_EN != True"
+    />
+
+    <lsccip:port name          = "apb_penable_i"
+                 dir           = "in"
+                 conn_mod      = "lscc_pll"
+                 conn_port     = "apb_penable_i"
+                 stick_low     = "not APB_EN"
+                 bus_interface = "APB_SLV"
+    />
+
+    <lsccip:port name          = "apb_psel_i"
+                 dir           = "in"
+                 conn_mod      = "lscc_pll"
+                 conn_port     = "apb_psel_i"
+                 stick_low     = "not APB_EN"
+                 bus_interface = "APB_SLV"
+    />
+
+    <lsccip:port name          = "apb_pwrite_i"
+                 dir           = "in"
+                 conn_mod      = "lscc_pll"
+                 conn_port     = "apb_pwrite_i"
+                 stick_low     = "not APB_EN"
+                 bus_interface = "APB_SLV"
+    />
+
+    <lsccip:port name          = "apb_paddr_i"
+                 dir           = "in"
+                 conn_mod      = "lscc_pll"
+                 conn_port     = "apb_paddr_i"
+                 range         = "(31, 0)"
+                 stick_low     = "not APB_EN"
+                 bus_interface = "APB_SLV"
+    />
+
+    <lsccip:port name          = "apb_pwdata_i"
+                 dir           = "in"
+                 conn_mod      = "lscc_pll"
+                 conn_port     = "apb_pwdata_i"
+                 range         = "(31, 0)"
+                 stick_low     = "not APB_EN"
+                 bus_interface = "APB_SLV"
+    />
+
+    <!-- APB outputs -->
+    <lsccip:port name          = "apb_pready_o"
+                 dir           = "out"
+                 conn_mod      = "lscc_pll"
+                 conn_port     = "apb_pready_o"
+                 dangling      = "not APB_EN"
+                 bus_interface = "APB_SLV"
+    />
+
+    <lsccip:port name          = "apb_pslverr_o"
+                 dir           = "out"
+                 conn_mod      = "lscc_pll"
+                 conn_port     = "apb_pslverr_o"
+                 dangling      = "not APB_EN"
+                 bus_interface = "APB_SLV"
+    />
+
+    <lsccip:port name          = "apb_prdata_o"
+                 dir           = "out"
+                 conn_mod      = "lscc_pll"
+                 conn_port     = "apb_prdata_o"
+                 range         = "(31, 0)"
+                 dangling      = "not APB_EN"
+                 bus_interface = "APB_SLV"
+    />
+
+</lsccip:ports>

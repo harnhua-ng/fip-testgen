@@ -1,0 +1,868 @@
+<?xml version="1.0" ?>
+<lsccip:settings xmlns:lsccip="http://www.latticesemi.com/XMLSchema/Radiant/ip">
+
+
+    <lsccip:setting id                 = "INTFBKDEL_SEL"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['INTFBKDEL_SEL']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "PMU_WAITFORLOCK"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['PMU_WAITFORLOCK']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "REF_OSC_CTRL"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['REF_OSC_CTRL']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "REF_COUNTS"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['REF_COUNTS']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "EN_REFCLK_MON"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "int"
+                    value_expr         = "gpll_param.rtl_params['EN_REFCLK_MON']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "FVCO"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "float"
+                    value_expr         = "gpll_param.rtl_params['FVCO']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+    <lsccip:setting id                 = "FVCO_STR"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['FVCO_STR']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKI_FREQ"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "float"
+                    value_expr         = "gpll_param.rtl_params['CLKI_FREQ']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKI_FREQ_STR"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['CLKI_FREQ_STR']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKI_DIVIDER_ACTUAL_STR"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['CLKI_DIVIDER_ACTUAL_STR']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "FRAC_N_EN"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['FRAC_N_EN']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "FBK_MODE"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['FBK_MODE']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "FBCLK_DIVIDER_ACTUAL_STR"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['FBCLK_DIVIDER_ACTUAL_STR']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "SSC_N_CODE_STR"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['SSC_N_CODE_STR']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "SSC_F_CODE_STR"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['SSC_F_CODE_STR']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "SS_EN"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['SS_EN']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "SSC_PROFILE"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['SSC_PROFILE']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "SSC_TBASE_STR"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['SSC_TBASE_STR']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "SSC_STEP_IN_STR"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['SSC_STEP_IN_STR']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "SSC_REG_WEIGHTING_SEL_STR"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['SSC_REG_WEIGHTING_SEL_STR']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+
+
+
+    <lsccip:setting id                 = "CLKOP_BYPASS"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['CLKOP_BYPASS']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "ENCLKOP_EN"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['ENCLKOP_EN']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOP_FREQ_ACTUAL"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "float"
+                    value_expr         = "gpll_param.rtl_params['CLKOP_FREQ_ACTUAL']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOP_PHASE_ACTUAL"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "float"
+                    value_expr         = "gpll_param.rtl_params['CLKOP_PHASE_ACTUAL']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "DIVOP_ACTUAL_STR"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['DIVOP_ACTUAL_STR']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "DELA"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['DELA']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "PHIA"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['PHIA']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "TRIM_EN_P"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['TRIM_EN_P']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOP_TRIM_MODE"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['CLKOP_TRIM_MODE']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOP_TRIM"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['CLKOP_TRIM']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOS_EN"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['CLKOS_EN']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOS_BYPASS"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['CLKOS_BYPASS']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "ENCLKOS_EN"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['ENCLKOS_EN']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOS_FREQ_ACTUAL"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "float"
+                    value_expr         = "gpll_param.rtl_params['CLKOS_FREQ_ACTUAL']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOS_PHASE_ACTUAL"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "float"
+                    value_expr         = "gpll_param.rtl_params['CLKOS_PHASE_ACTUAL']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "DIVOS_ACTUAL_STR"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['DIVOS_ACTUAL_STR']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "DELB"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['DELB']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "PHIB"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['PHIB']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "TRIM_EN_S"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['TRIM_EN_S']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOS_TRIM_MODE"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['CLKOS_TRIM_MODE']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOS_TRIM"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['CLKOS_TRIM']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOS2_EN"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['CLKOS2_EN']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOS2_BYPASS"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['CLKOS2_BYPASS']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "ENCLKOS2_EN"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['ENCLKOS2_EN']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOS2_FREQ_ACTUAL"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "float"
+                    value_expr         = "gpll_param.rtl_params['CLKOS2_FREQ_ACTUAL']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOS2_PHASE_ACTUAL"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "float"
+                    value_expr         = "gpll_param.rtl_params['CLKOS2_PHASE_ACTUAL']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "DIVOS2_ACTUAL_STR"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['DIVOS2_ACTUAL_STR']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "DELC"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['DELC']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "PHIC"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['PHIC']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOS3_EN"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['CLKOS3_EN']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOS3_BYPASS"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['CLKOS3_BYPASS']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "ENCLKOS3_EN"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['ENCLKOS3_EN']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOS3_FREQ_ACTUAL"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "float"
+                    value_expr         = "gpll_param.rtl_params['CLKOS3_FREQ_ACTUAL']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOS3_PHASE_ACTUAL"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "float"
+                    value_expr         = "gpll_param.rtl_params['CLKOS3_PHASE_ACTUAL']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "DIVOS3_ACTUAL_STR"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['DIVOS3_ACTUAL_STR']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "DELD"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['DELD']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "PHID"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['PHID']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOS4_EN"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['CLKOS4_EN']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOS4_BYPASS"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['CLKOS4_BYPASS']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "ENCLKOS4_EN"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['ENCLKOS4_EN']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOS4_FREQ_ACTUAL"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "float"
+                    value_expr         = "gpll_param.rtl_params['CLKOS4_FREQ_ACTUAL']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOS4_PHASE_ACTUAL"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "float"
+                    value_expr         = "gpll_param.rtl_params['CLKOS4_PHASE_ACTUAL']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "DIVOS4_ACTUAL_STR"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['DIVOS4_ACTUAL_STR']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "DELE"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['DELE']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "PHIE"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['PHIE']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOS5_EN"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['CLKOS5_EN']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOS5_BYPASS"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['CLKOS5_BYPASS']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "ENCLKOS5_EN"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['ENCLKOS5_EN']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOS5_FREQ_ACTUAL"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "float"
+                    value_expr         = "gpll_param.rtl_params['CLKOS5_FREQ_ACTUAL']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CLKOS5_PHASE_ACTUAL"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "float"
+                    value_expr         = "gpll_param.rtl_params['CLKOS5_PHASE_ACTUAL']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "DIVOS5_ACTUAL_STR"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['DIVOS5_ACTUAL_STR']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "DELF"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['DELF']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "PHIF"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['PHIF']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+
+
+    <lsccip:setting id                 = "PLL_REFCLK_FROM_PIN"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['PLL_REFCLK_FROM_PIN']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "IO_TYPE"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['IO_TYPE']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "DYN_PORTS_EN"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['DYN_PORTS_EN']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "PLL_RST"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['PLL_RST']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "LOCK_EN"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['LOCK_EN']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "PLL_LOCK_STICKY"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['PLL_LOCK_STICKY']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "LMMI_EN"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['LMMI_EN']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "APB_EN"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['APB_EN']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "APB_SOFT_REG_EN"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['APB_SOFT_REG_EN']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "LEGACY_EN"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['LEGACY_EN']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "POWERDOWN_EN"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "gpll_param.rtl_params['POWERDOWN_EN']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+
+
+
+    <lsccip:setting id                 = "IPI_CMP"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['IPI_CMP']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CSET"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['CSET']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "CRIPPLE"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['CRIPPLE']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "IPP_CTRL"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['IPP_CTRL']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "IPP_SEL"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['IPP_SEL']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "BW_CTL_BIAS"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['BW_CTL_BIAS']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "V2I_PP_RES"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['V2I_PP_RES']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "KP_VCO"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['KP_VCO']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "V2I_KVCO_SEL"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['V2I_KVCO_SEL']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+
+    <lsccip:setting id                 = "V2I_1V_EN"
+                    type               = "param"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.rtl_params['V2I_1V_EN']"
+                    editable           = "False"
+                    hidden             = "True"
+    />
+    <lsccip:setting id                 = "IS_JP_DEVICE"
+                    type               = "verilog_macro"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    value_expr         = "check_is_jp_device()"
+                    editable           = "False"
+                    hidden             = "True"
+    />    
+
+
+
+</lsccip:settings>

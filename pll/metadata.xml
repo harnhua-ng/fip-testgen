@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<lsccip:ip version="1.0"
+        xmlns:lsccip="http://www.latticesemi.com/XMLSchema/Radiant/ip"
+        xmlns:xi="http://www.w3.org/2001/XInclude">
+
+  <lsccip:general>
+    <lsccip:vendor>latticesemi.com</lsccip:vendor>
+    <lsccip:library>module</lsccip:library>
+    <lsccip:name>pll</lsccip:name>
+    <lsccip:display_name>PLL</lsccip:display_name>
+    <lsccip:version>1.9.1</lsccip:version>
+    <lsccip:category>Architecture_Modules</lsccip:category>
+    <lsccip:min_radiant_version>2025.1</lsccip:min_radiant_version>
+    <lsccip:min_esi_version>2025.1</lsccip:min_esi_version>
+    <lsccip:supported_products>
+      <lsccip:supported_family name="LIFCL"></lsccip:supported_family>
+      <lsccip:supported_family name="LFD2NX"></lsccip:supported_family>
+      <lsccip:supported_family name="LFCPNX"></lsccip:supported_family>
+      <lsccip:supported_family name="jd5d00"></lsccip:supported_family>
+      <lsccip:supported_family name="LFMXO5"></lsccip:supported_family>
+      <lsccip:supported_family name="UT24C"></lsccip:supported_family>
+      <lsccip:supported_family name="UT24CP"></lsccip:supported_family>
+    </lsccip:supported_products>
+    <lsccip:supported_platforms>
+      <lsccip:supported_platform name="esi" />
+      <lsccip:supported_platform name="radiant" />
+    </lsccip:supported_platforms>
+  </lsccip:general>
+
+  <xi:include href="gpll_settings.xml" parse="xml"/>
+
+  <xi:include href="gpll_ports.xml" parse="xml"/>
+
+  <xi:include href="bus_interface.xml" parse="xml"/>
+
+  <xi:include href="memory_map.xml" parse="xml"/>
+
+  <lsccip:componentGenerators>
+    <lsccip:componentGenerator>
+      <lsccip:name>gpll_cfg_upd</lsccip:name>
+      <lsccip:generatorExe>testbench/gpll_cfg_upd.py</lsccip:generatorExe>
+    </lsccip:componentGenerator>
+  </lsccip:componentGenerators>
+
+</lsccip:ip>

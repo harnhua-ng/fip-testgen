@@ -1,0 +1,663 @@
+<?xml version="1.0"?>
+<lsccip:settings xmlns:lsccip="http://www.latticesemi.com/XMLSchema/Radiant/ip"
+                 xmlns:xi="http://www.w3.org/2001/XInclude">
+
+    <!-- General -->
+    <lsccip:setting id                 = "RUN_CALC"
+                    type               = "command"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    title              = "Calculate"
+                    description        = "Calculate the Optimum parameter values"
+                    value_expr         = "gpll_param.cmd_run_calc()"
+                    group1             = "General"
+    />
+
+    <lsccip:setting id                 = "set_attributes"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.set_attr(gui_config_mode,
+                                                              gui_optim_prio,
+                                                              gui_en_frac_n,
+                                                              gui_en_ssc,
+                                                              gui_en_usr_fbk,
+                                                              gui_en_pmu_wait_lock,
+                                                              gui_en_int_fbkdel_sel,
+                                                              gui_refclk_freq,
+                                                              gui_m_div,
+                                                              gui_en_refclk_mon,
+                                                              gui_refclk_mon_freq,
+                                                              gui_fbk_mode,
+                                                              gui_n_div,
+                                                              gui_frac_n_div,
+                                                              gui_ssc_profile,
+                                                              gui_ssc_mod_depth,
+                                                              gui_ssc_mod_freq,
+                                                              gui_en_refclk_pin,
+                                                              gui_refclk_io_type,
+                                                              gui_en_dyn_phase,
+                                                              gui_en_pll_reset,
+                                                              gui_en_pll_lock,
+                                                              gui_pll_lock_sticky,
+                                                              gui_reg_interface,
+                                                              gui_en_csr,
+                                                              gui_en_legacy,
+                                                              gui_en_powerdown,
+                                                              gui_clkout)"
+                    editable           = "0"
+                    hidden             = "bool(1)"
+    />
+
+    <lsccip:setting id                 = "gui_clkout"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "{'CLKOP' : {'EN'       :1,
+                                                      'BYP'      :gui_clk_op_byp,
+                                                      'FREQ'     :gui_clk_op_freq,
+                                                      'DIV'      :gui_clk_op_div,
+                                                      'PHASE'    :gui_clk_op_phase,
+                                                      'TOL'      :gui_clk_op_tol,
+                                                      'TRIM_EN'  :gui_clk_op_trim_en,
+                                                      'TRIM_MODE':gui_clk_op_trim_mode,
+                                                      'TRIM_MULT':gui_clk_op_trim_mult,
+                                                      'CLKEN'    :gui_en_clken_op
+                                                     },
+                                           'CLKOS' : {'EN'       :gui_clk_os_en,
+                                                      'BYP'      :gui_clk_os_byp,
+                                                      'FREQ'     :gui_clk_os_freq,
+                                                      'DIV'      :gui_clk_os_div,
+                                                      'PHASE'    :gui_clk_os_phase,
+                                                      'TOL'      :gui_clk_os_tol,
+                                                      'TRIM_EN'  :gui_clk_os_trim_en,
+                                                      'TRIM_MODE':gui_clk_os_trim_mode,
+                                                      'TRIM_MULT':gui_clk_os_trim_mult,
+                                                      'CLKEN'    :gui_en_clken_os
+                                                     },
+                                           'CLKOS2': {'EN'       :gui_clk_s2_en,
+                                                      'BYP'      :gui_clk_s2_byp,
+                                                      'FREQ'     :gui_clk_s2_freq,
+                                                      'DIV'      :gui_clk_s2_div,
+                                                      'PHASE'    :gui_clk_s2_phase,
+                                                      'TOL'      :gui_clk_s2_tol,
+                                                      'CLKEN'    :gui_en_clken_s2
+                                                     },
+                                           'CLKOS3': {'EN'       :gui_clk_s3_en,
+                                                      'BYP'      :gui_clk_s3_byp,
+                                                      'FREQ'     :gui_clk_s3_freq,
+                                                      'DIV'      :gui_clk_s3_div,
+                                                      'PHASE'    :gui_clk_s3_phase,
+                                                      'TOL'      :gui_clk_s3_tol,
+                                                      'CLKEN'    :gui_en_clken_s3
+                                                     },
+                                           'CLKOS4': {'EN'       :gui_clk_s4_en,
+                                                      'BYP'      :gui_clk_s4_byp,
+                                                      'FREQ'     :gui_clk_s4_freq,
+                                                      'DIV'      :gui_clk_s4_div,
+                                                      'PHASE'    :gui_clk_s4_phase,
+                                                      'TOL'      :gui_clk_s4_tol,
+                                                      'CLKEN'    :gui_en_clken_s4
+                                                     },
+                                           'CLKOS5': {'EN'       :gui_clk_s5_en,
+                                                      'BYP'      :gui_clk_s5_byp,
+                                                      'FREQ'     :gui_clk_s5_freq,
+                                                      'DIV'      :gui_clk_s5_div,
+                                                      'PHASE'    :gui_clk_s5_phase,
+                                                      'TOL'      :gui_clk_s5_tol,
+                                                      'CLKEN'    :gui_en_clken_s5
+                                                     }
+                                         }"
+                    editable           = "0"
+                    hidden             = "bool(1)"
+    />
+
+    <lsccip:setting id                 = "print_attributes"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    value_expr         = "gpll_param.print_attr(0)"
+                    editable           = "0"
+                    hidden             = "bool(1)"
+    />
+
+    <lsccip:setting id                 = "gui_config_mode"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    title              = "Configuration Mode"
+                    default            = "FREQUENCY"
+                    options            = "gpll_param.gui_config_mode.options"
+                    value_expr         = "gpll_param.gui_config_mode.cal_val"
+                    editable           = "gpll_param.gui_config_mode.editopt"
+                    hidden             = "bool(gpll_param.gui_config_mode.hideopt)"
+                    group1             = "General"
+    />
+
+    <lsccip:setting id                 = "gui_optim_prio"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    title              = "Set Parameter Optimization Target"
+                    default            = "JITTER"
+                    options            = "gpll_param.gui_optim_prio.options"
+                    value_expr         = "gpll_param.gui_optim_prio.cal_val"
+                    editable           = "bool(gpll_param.gui_optim_prio.editopt)"
+                    hidden             = "bool(gpll_param.gui_optim_prio.hideopt)"
+                    group1             = "General"
+    />
+
+    <lsccip:setting id                 = "gui_en_frac_n"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    title              = "Enable Fractional-N Divider"
+                    default            = "False"
+                    value_expr         = "gpll_param.gui_en_frac_n.cal_val"
+                    editable           = "gpll_param.gui_en_frac_n.editopt"
+                    hidden             = "bool(gpll_param.gui_en_frac_n.hideopt)"
+                    group1             = "General"
+    />
+
+    <lsccip:setting id                 = "gui_en_ssc"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    title              = "Enable Spread Spectrum Clock Generation"
+                    default            = "False"
+                    value_expr         = "gpll_param.gui_en_ssc.cal_val"
+                    editable           = "gpll_param.gui_en_ssc.editopt"
+                    hidden             = "bool(gpll_param.gui_en_ssc.hideopt)"
+                    group1             = "General"
+    />
+
+    <lsccip:setting id                 = "gui_en_usr_fbk"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    title              = "Enable User Feedback Clock"
+                    default            = "False"
+                    value_expr         = "gpll_param.gui_en_usr_fbk.cal_val"
+                    editable           = "gpll_param.gui_en_usr_fbk.editopt"
+                    hidden             = "bool(gpll_param.gui_en_usr_fbk.hideopt)"
+                    group1             = "General"
+    />
+
+    <lsccip:setting id                 = "gui_en_pmu_wait_lock"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    title              = "Enable PMU Wait for Lock"
+                    default            = "True"
+                    value_expr         = "gpll_param.gui_en_pmu_wait_lock.cal_val"
+                    editable           = "gpll_param.gui_en_pmu_wait_lock.editopt"
+                    hidden             = "bool(gpll_param.gui_en_pmu_wait_lock.hideopt)"
+                    group1             = "General"
+    />
+
+    <lsccip:setting id                 = "gui_en_int_fbkdel_sel"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    title              = "Enable Internal Path Switching"
+                    default            = "False"
+                    value_expr         = "gpll_param.gui_en_int_fbkdel_sel.cal_val"
+                    editable           = "gpll_param.gui_en_int_fbkdel_sel.editopt"
+                    hidden             = "bool(gpll_param.gui_en_int_fbkdel_sel.hideopt)"
+                    group1             = "General"
+    />
+
+    <lsccip:setting id                 = "gui_vco_freq"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "float"
+                    value_range        = "gpll_param.gui_vco_freq.options"
+                    title              = "VCO Frequency"
+                    value_expr         = "gpll_param.gui_vco_freq.cal_val"
+                    editable           = "gpll_param.gui_vco_freq.editopt"
+                    hidden             = "bool(gpll_param.gui_vco_freq.hideopt)"
+                    group1             = "General"
+    />
+
+    <!-- Reference Clock -->
+    <lsccip:setting id                 = "gui_refclk_freq"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "float"
+                    title              = "CLKI: Frequency (MHz)"
+                    default            = "100.0"
+                    value_range        = "gpll_param.gui_refclk_freq.options"
+                    value_expr         = "gpll_param.gui_refclk_freq.cal_val"
+                    editable           = "gpll_param.gui_refclk_freq.editopt"
+                    hidden             = "bool(gpll_param.gui_refclk_freq.hideopt)"
+                    group1             = "Reference Clock"
+    />
+
+    <lsccip:setting id                 = "gui_m_div"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "int"
+                    title              = "CLKI: Divider Desired Value"
+                    default            = "1"
+                    value_range        = "gpll_param.gui_m_div.options"
+                    value_expr         = "gpll_param.gui_m_div.cal_val"
+                    editable           = "gpll_param.gui_m_div.editopt"
+                    hidden             = "bool(gpll_param.gui_m_div.hideopt)"
+                    group1             = "Reference Clock"
+    />
+
+    <lsccip:setting id                 = "gui_m_div_disp"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "int"
+                    title              = "CLKI: Divider Actual Value"
+                    default            = "1"
+                    value_range        = "gpll_param.gui_m_div.options"
+                    value_expr         = "gpll_param.gui_m_div.cal_val"
+                    editable           = "False"
+                    hidden             = "bool(gpll_param.gui_m_div.hidedsp)"
+                    group1             = "Reference Clock"
+    />
+
+    <lsccip:setting id                 = "gui_phasedet_freq"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "float"
+                    title              = "Phase Detector Frequency (MHz)"
+                    value_range        = "gpll_param.gui_phasedet_freq.options"
+                    value_expr         = "gpll_param.gui_phasedet_freq.cal_val"
+                    editable           = "gpll_param.gui_phasedet_freq.editopt"
+                    hidden             = "bool(gpll_param.gui_phasedet_freq.hideopt)"
+                    group1             = "Reference Clock"
+    />
+
+    <lsccip:setting id                 = "gui_en_refclk_mon"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    title              = "Enable Reference Clock Monitor"
+                    default            = "False"
+                    value_expr         = "gpll_param.gui_en_refclk_mon.cal_val"
+                    editable           = "gpll_param.gui_en_refclk_mon.editopt"
+                    hidden             = "bool(gpll_param.gui_en_refclk_mon.hideopt)"
+                    group1             = "Reference Clock"
+    />
+
+    <lsccip:setting id                 = "gui_refclk_mon_freq"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    title              = "Select Monitor Clock Frequency"
+                    default            = "3P2"
+                    options            = "gpll_param.gui_refclk_mon_freq.options"
+                    value_expr         = "gpll_param.gui_refclk_mon_freq.cal_val"
+                    editable           = "gpll_param.gui_refclk_mon_freq.editopt"
+                    hidden             = "bool(gpll_param.gui_refclk_mon_freq.hideopt)"
+                    group1             = "Reference Clock"
+    />
+
+    <!-- Feedback -->
+    <lsccip:setting id                 = "gui_fbk_mode"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    title              = "CLKFB: Feedback Mode"
+                    default            = "CLKOP"
+                    options            = "gpll_param.gui_fbk_mode.options"
+                    value_expr         = "gpll_param.gui_fbk_mode.cal_val"
+                    editable           = "gpll_param.gui_fbk_mode.editopt"
+                    hidden             = "bool(gpll_param.gui_fbk_mode.hideopt)"
+                    group1             = "Feedback"
+    />
+
+    <lsccip:setting id                 = "gui_fbk_mode_disp"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    title              = "CLKFB: Feedback Mode"
+                    default            = "CLKOP"
+                    options            = "gpll_param.gui_fbk_mode.options"
+                    value_expr         = "gpll_param.gui_fbk_mode.cal_val"
+                    editable           = "False"
+                    hidden             = "bool(gpll_param.gui_fbk_mode.hidedsp)"
+                    group1             = "Feedback"
+    />
+
+    <lsccip:setting id                 = "gui_n_div"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "int"
+                    title              = "CLKFB: FBK Divider Desired Value (Integer)"
+                    default            = "1"
+                    value_range        = "gpll_param.gui_n_div.options"
+                    value_expr         = "int(gpll_param.gui_n_div.cal_val)"
+                    editable           = "gpll_param.gui_n_div.editopt"
+                    hidden             = "bool(gpll_param.gui_n_div.hideopt)"
+                    group1             = "Feedback"
+    />
+
+    <lsccip:setting id                 = "gui_n_div_disp"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "int"
+                    title              = "CLKFB: FBK Divider Actual Value (Integer)"
+                    default            = "1"
+                    value_range        = "gpll_param.gui_n_div.options"
+                    value_expr         = "int(gpll_param.gui_n_div.cal_val)"
+                    editable           = "False"
+                    hidden             = "bool(gpll_param.gui_n_div.hidedsp)"
+                    group1             = "Feedback"
+    />
+
+    <lsccip:setting id                 = "gui_frac_n_div"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "int"
+                    title              = "CLKFB: FBK Divider Desired Value (Fractional)"
+                    description        = "Desired value : Fractional part of the Feedback divider : [Value]/4096"
+                    default            = "0"
+                    value_range        = "gpll_param.gui_frac_n_div.options"
+                    value_expr         = "gpll_param.gui_frac_n_div.cal_val"
+                    editable           = "gpll_param.gui_frac_n_div.editopt"
+                    hidden             = "bool(gpll_param.gui_frac_n_div.hideopt)"
+                    group1             = "Feedback"
+    />
+
+    <lsccip:setting id                 = "gui_frac_n_div_disp"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "int"
+                    title              = "CLKFB: FBK Divider Actual Value (Fractional)"
+                    description        = "Actual value : Fractional part of the Feedback divider : [Value]/4096"
+                    default            = "0"
+                    value_range        = "gpll_param.gui_frac_n_div.options"
+                    value_expr         = "gpll_param.gui_frac_n_div.cal_val"
+                    editable           = "False"
+                    hidden             = "bool(gpll_param.gui_frac_n_div.hidedsp)"
+                    group1             = "Feedback"
+    />
+
+    <lsccip:setting id                 = "fbclk_divider_decimal_disp"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "float"
+                    title              = "CLKFB: FBK Divider Actual Value (Float)"
+                    value_expr         = "gpll_param.gui_n_div.cal_val"
+                    editable           = "False"
+                    hidden             = "bool(gpll_param.gui_frac_n_div.hideopt and gpll_param.gui_frac_n_div.hidedsp)"
+                    group1             = "Feedback"
+    />
+
+    <!-- Spread Spectrum -->
+    <lsccip:setting id                 = "gui_ssc_profile"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    title              = "Spread Spectrum Profile"
+                    default            = "DOWN"
+                    options            = "gpll_param.gui_ssc_profile.options"
+                    value_expr         = "gpll_param.gui_ssc_profile.cal_val"
+                    editable           = "gpll_param.gui_ssc_profile.editopt"
+                    hidden             = "bool(gpll_param.gui_ssc_profile.hideopt)"
+                    group1             = "Spread Spectrum"
+    />
+
+    <lsccip:setting id                 = "gui_ssc_mod_depth"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "float"
+                    title              = "Triangle Modulation Depth %"
+                    default            = "1.00"
+                    options            = "gpll_param.gui_ssc_mod_depth.options"
+                    value_expr         = "gpll_param.gui_ssc_mod_depth.cal_val"
+                    editable           = "gpll_param.gui_ssc_mod_depth.editopt"
+                    hidden             = "bool(gpll_param.gui_ssc_mod_depth.hideopt)"
+                    group1             = "Spread Spectrum"
+    />
+
+    <lsccip:setting id                 = "gui_ssc_mod_freq"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "float"
+                    title              = "Desired Modulation Frequency KHz"
+                    default            = "100.0"
+                    value_range        = "gpll_param.gui_ssc_mod_freq.options"
+                    value_expr         = "gpll_param.gui_ssc_mod_freq.cal_val"
+                    editable           = "gpll_param.gui_ssc_mod_freq.editopt"
+                    hidden             = "bool(gpll_param.gui_ssc_mod_freq.hideopt)"
+                    group1             = "Spread Spectrum"
+    />
+
+    <!-- Output Clock Settings -->
+    <xi:include href="gpll_clkout_settings.xml" parse="xml" xpointer="xmlns(lsccip=http://www.latticesemi.com/XMLSchema/Radiant/ip)xpointer(//lsccip:setting)" />
+
+
+    <!-- Optional Ports -->
+    <lsccip:setting id                 = "gui_en_refclk_pin"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    title              = "Set I/O Pin for PLL Reference Clock"
+                    default            = "False"
+                    value_expr         = "gpll_param.gui_en_refclk_pin.cal_val"
+                    editable           = "gpll_param.gui_en_refclk_pin.editopt"
+                    hidden             = "bool(gpll_param.gui_en_refclk_pin.hideopt)"
+                    group1             = "Reference Clock I/O Pin"
+                    group2             = "Optional Ports"
+    />
+
+    <lsccip:setting id                 = "gui_refclk_io_type"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    title              = "I/O Standard for Reference Clock"
+                    default            = "LVDS"
+                    options            = "gpll_param.gui_refclk_io_type.options"
+                    value_expr         = "gpll_param.gui_refclk_io_type.cal_val"
+                    editable           = "gpll_param.gui_refclk_io_type.editopt"
+                    hidden             = "bool(gpll_param.gui_refclk_io_type.hideopt)"
+                    group1             = "Reference Clock I/O Pin"
+                    group2             = "Optional Ports"
+    />
+
+    <lsccip:setting id                 = "gui_en_dyn_phase"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    title              = "Enable Dynamic Phase Ports"
+                    default            = "False"
+                    value_expr         = "gpll_param.gui_en_dyn_phase.cal_val"
+                    editable           = "gpll_param.gui_en_dyn_phase.editopt"
+                    hidden             = "bool(gpll_param.gui_en_dyn_phase.hideopt)"
+                    group1             = "Dynamic Phase Control Ports"
+                    group2             = "Optional Ports"
+    />
+
+    <lsccip:setting id                 = "gui_en_clken_op"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    title              = "CLKOP Enable Port"
+                    default            = "False"
+                    value_expr         = "gpll_param.gui_clkout['CLKOP']['CLKEN'].cal_val"
+                    editable           = "gpll_param.gui_clkout['CLKOP']['CLKEN'].editopt"
+                    hidden             = "bool(gpll_param.gui_clkout['CLKOP']['CLKEN'].hideopt)"
+                    group1             = "Clock Enable Ports"
+                    group2             = "Optional Ports"
+    />
+
+    <lsccip:setting id                 = "gui_en_clken_os"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    title              = "CLKOS Enable Port"
+                    default            = "False"
+                    value_expr         = "gpll_param.gui_clkout['CLKOS']['CLKEN'].cal_val"
+                    editable           = "gpll_param.gui_clkout['CLKOS']['CLKEN'].editopt"
+                    hidden             = "bool(gpll_param.gui_clkout['CLKOS']['CLKEN'].hideopt)"
+                    group1             = "Clock Enable Ports"
+                    group2             = "Optional Ports"
+    />
+
+    <lsccip:setting id                 = "gui_en_clken_s2"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    title              = "CLKOS2 Enable Port"
+                    default            = "False"
+                    value_expr         = "gpll_param.gui_clkout['CLKOS2']['CLKEN'].cal_val"
+                    editable           = "gpll_param.gui_clkout['CLKOS2']['CLKEN'].editopt"
+                    hidden             = "bool(gpll_param.gui_clkout['CLKOS2']['CLKEN'].hideopt)"
+                    group1             = "Clock Enable Ports"
+                    group2             = "Optional Ports"
+    />
+
+    <lsccip:setting id                 = "gui_en_clken_s3"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    title              = "CLKOS3 Enable Port"
+                    default            = "False"
+                    value_expr         = "gpll_param.gui_clkout['CLKOS3']['CLKEN'].cal_val"
+                    editable           = "gpll_param.gui_clkout['CLKOS3']['CLKEN'].editopt"
+                    hidden             = "bool(gpll_param.gui_clkout['CLKOS3']['CLKEN'].hideopt)"
+                    group1             = "Clock Enable Ports"
+                    group2             = "Optional Ports"
+    />
+
+    <lsccip:setting id                 = "gui_en_clken_s4"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    title              = "CLKOS4 Enable Port"
+                    default            = "False"
+                    value_expr         = "gpll_param.gui_clkout['CLKOS4']['CLKEN'].cal_val"
+                    editable           = "gpll_param.gui_clkout['CLKOS4']['CLKEN'].editopt"
+                    hidden             = "bool(gpll_param.gui_clkout['CLKOS4']['CLKEN'].hideopt)"
+                    group1             = "Clock Enable Ports"
+                    group2             = "Optional Ports"
+    />
+
+    <lsccip:setting id                 = "gui_en_clken_s5"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    title              = "CLKOS5 Enable Port"
+                    default            = "False"
+                    value_expr         = "gpll_param.gui_clkout['CLKOS5']['CLKEN'].cal_val"
+                    editable           = "gpll_param.gui_clkout['CLKOS5']['CLKEN'].editopt"
+                    hidden             = "bool(gpll_param.gui_clkout['CLKOS5']['CLKEN'].hideopt)"
+                    group1             = "Clock Enable Ports"
+                    group2             = "Optional Ports"
+    />
+
+    <lsccip:setting id                 = "gui_en_pll_reset"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    title              = "Provide PLL Reset"
+                    default            = "True"
+                    value_expr         = "gpll_param.gui_en_pll_reset.cal_val"
+                    editable           = "gpll_param.gui_en_pll_reset.editopt"
+                    hidden             = "bool(gpll_param.gui_en_pll_reset.hideopt)"
+                    group1             = "PLL Reset"
+                    group2             = "Optional Ports"
+    />
+
+    <lsccip:setting id                 = "gui_en_pll_lock"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    title              = "Provide PLL Lock Signal"
+                    default            = "True"
+                    value_expr         = "gpll_param.gui_en_pll_lock.cal_val"
+                    editable           = "gpll_param.gui_en_pll_lock.editopt"
+                    hidden             = "bool(gpll_param.gui_en_pll_lock.hideopt)"
+                    group1             = "PLL Lock"
+                    group2             = "Optional Ports"
+    />
+
+    <lsccip:setting id                 = "gui_pll_lock_sticky"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    title              = "PLL Lock is Sticky"
+                    default            = "False"
+                    value_expr         = "gpll_param.gui_pll_lock_sticky.cal_val"
+                    editable           = "gpll_param.gui_pll_lock_sticky.editopt"
+                    hidden             = "bool(gpll_param.gui_pll_lock_sticky.hideopt)"
+                    group1             = "PLL Lock"
+                    group2             = "Optional Ports"
+    />
+
+    <lsccip:setting id                 = "gui_reg_interface"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "string"
+                    default            = "None"
+                    options            = "gpll_param.gui_reg_interface.options"
+                    title              = "Select Register Interface"
+                    value_expr         = "gpll_param.gui_reg_interface.cal_val"
+                    editable           = "gpll_param.gui_reg_interface.editopt"
+                    hidden             = "bool(gpll_param.gui_reg_interface.hideopt)"
+                    group1             = "Register Interface"
+                    group2             = "Optional Ports"
+    />
+
+    <lsccip:setting id                 = "gui_en_csr"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    default            = "False"
+                    title              = "Enable Soft Control Registers"
+                    value_expr         = "gpll_param.gui_en_csr.cal_val"
+                    editable           = "gpll_param.gui_en_csr.editopt"
+                    hidden             = "bool(gpll_param.gui_en_csr.hideopt)"
+                    group1             = "Register Interface"
+                    group2             = "Optional Ports"
+    />
+
+    <lsccip:setting id                 = "gui_en_legacy"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    title              = "Enable Legacy Mode"
+                    default            = "False"
+                    value_expr         = "gpll_param.gui_en_legacy.cal_val"
+                    editable           = "gpll_param.gui_en_legacy.editopt"
+                    hidden             = "bool(gpll_param.gui_en_legacy.hideopt)"
+                    group1             = "Power Mode Settings"
+                    group2             = "Optional Ports"
+    />
+
+    <lsccip:setting id                 = "gui_en_powerdown"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "bool"
+                    title              = "Enable Powerdown Mode"
+                    default            = "False"
+                    value_expr         = "gpll_param.gui_en_powerdown.cal_val"
+                    editable           = "gpll_param.gui_en_powerdown.editopt"
+                    hidden             = "bool(gpll_param.gui_en_powerdown.hideopt)"
+                    group1             = "Power Mode Settings"
+                    group2             = "Optional Ports"
+    />
+
+    <lsccip:setting id                 = "gui_sim_type"
+                    type               = "input"
+                    conn_mod           = "lscc_pll"
+                    value_type         = "int"
+                    title              = "Simulation Type"
+                    default            = "0"
+                    options            = "[('RTL_SIM',0),('GATE_SIM',1)]"
+                    editable           = "bool(0)"
+                    hidden             = "bool(1)"
+                    group2             = "Simulation"
+    />
+
+    <!-- RTL Parameters -->
+    <xi:include href="gpll_rtl_params.xml" parse="xml" xpointer="xmlns(lsccip=http://www.latticesemi.com/XMLSchema/Radiant/ip)xpointer(//lsccip:setting)" />
+
+
+</lsccip:settings>
+

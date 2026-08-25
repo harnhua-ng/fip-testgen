@@ -1,0 +1,18 @@
+<lsccip:memoryMaps xmlns:lsccip="http://www.latticesemi.com/XMLSchema/Radiant/ip">
+    <lsccip:memoryMap>
+        <lsccip:name>pll_mem_map</lsccip:name>
+        <lsccip:description>PLL memory map</lsccip:description>
+
+        <lsccip:addressBlock>
+            <lsccip:name>PLL_REG</lsccip:name>
+            <lsccip:displayName>PLL Register</lsccip:displayName>
+            <lsccip:description>PLL Register Space</lsccip:description>
+            <lsccip:baseAddress>0</lsccip:baseAddress>
+            <lsccip:range>1024</lsccip:range>
+            <lsccip:width>32</lsccip:width>
+            <lsccip:usage>memory</lsccip:usage>
+            <lsccip:access>read-write</lsccip:access>
+        </lsccip:addressBlock>
+
+    </lsccip:memoryMap>
+</lsccip:memoryMaps>
