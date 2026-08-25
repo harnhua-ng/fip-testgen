@@ -297,14 +297,15 @@ def run_sim(tc_id, tc):
     with open(log_file, "a") as log:
         log.write(f"REAL_TIME_S={real_s:.3f}\n")
 
-    # Copy compiled work library to results/ so the engineer can reload
-    # the simulation in QuestaSim without keeping sim_build/ around.
-    work_src = os.path.join(sim_build, "work")
-    work_dst = os.path.join(results_dir, "tc-" + tc_id, "work")
-    if os.path.isdir(work_src):
-        if os.path.exists(work_dst):
-            shutil.rmtree(work_dst)
-        shutil.copytree(work_src, work_dst)
+    # Copy compiled work library to results/ only when KEEP_WORK=1.
+    # Default is to discard it — the library can be several hundred MB per TC.
+    if os.environ.get("KEEP_WORK", "0") == "1":
+        work_src = os.path.join(sim_build, "work")
+        work_dst = os.path.join(results_dir, "tc-" + tc_id, "work")
+        if os.path.isdir(work_src):
+            if os.path.exists(work_dst):
+                shutil.rmtree(work_dst)
+            shutil.copytree(work_src, work_dst)
 
     rc = proc.returncode
     if rc == 0:
