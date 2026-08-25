@@ -13,3 +13,16 @@ $ source ~/setup_radiant.sh ng2026_2.82
 5. Run simulations
 
 6. Review results
+
+fip-testgen contains different IP core folders.
+Each IP is supposed to have simulation testcases generated from a testplan document.
+- ebr_rom/ is the only completed IP so far, so use the code in ebr_rom/ as a reference.
+- within each IP's folder,
+-- docs/ contains its .md testplan (cannot be modified, source of truth).
+-- Makefile is the main makefile.
+-- metadata.xml and plugin/ contain its parameters and ports definitions (cannot be modified).
+-- Write outputs to results/ .
+-- rtl/ contains its RTL (cannot be modified).
+-- src/ contains the generated testcases using the cocotb framework.
+-- testbench/ contains the original testbench - reuse it or generate a new tb_<IP>.v testbench.
+- scripts/ contains shared code.
