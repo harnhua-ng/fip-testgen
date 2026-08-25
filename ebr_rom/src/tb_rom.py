@@ -30,6 +30,7 @@ import cocotb
 from cocotb.clock    import Clock
 from cocotb.triggers import RisingEdge, FallingEdge, ReadOnly, Timer
 from cocotb.utils    import get_sim_time
+from verilog_tracer  import VerilogTracer
 
 # ── Simulation parameters (set by run.sh via env vars) ───────────────────────
 RDATA_WIDTH    = int(os.getenv("RDATA_WIDTH",    "36"))
@@ -82,71 +83,6 @@ def _make_ref():
 
 
 REF = _make_ref()
-
-
-# ── Verilog Runtime Tracer & Trace Generator ──────────────────────────────────
-class VerilogTracer:
-    """Logs Verilog-equivalent statements to the transcript and generates standalone .trace.v files."""
-
-    def __init__(self, tc_name: str, out_dir: str = "results", enabled: bool = True):
-        self.tc_name = tc_name.upper().replace("_", "-")
-        self.out_dir = out_dir
-        self.enabled = enabled
-        self.trace_lines = [
-            "// ============================================================================",
-            f"// Verilog Stimulus & Check Trace: {self.tc_name}",
-            "// Auto-generated at runtime from src/tb_rom.py",
-            "// ============================================================================",
-            f"task automatic run_{self.tc_name.lower().replace('-', '_')}_trace;",
-        ]
-
-    def log_stmt(self, stmt: str):
-        """Print Verilog statement to transcript and record into trace buffer."""
-        if not self.enabled:
-            return
-        try:
-            t_ns = get_sim_time(unit="ns")
-            cocotb.log.info(f"[VERILOG @ {t_ns:7.2f} ns] {stmt}")
-        except Exception:
-            cocotb.log.info(f"[VERILOG] {stmt}")
-        self.trace_lines.append(f"    {stmt}")
-
-    def comment(self, text: str):
-        if self.enabled:
-            self.trace_lines.append(f"\n    // {text}")
-            cocotb.log.info(f"// --- {text} ---")
-
-    def assign(self, signal: str, value: int, width: int = 0):
-        if width > 0:
-            stmt = f"{signal} = {width}'h{value:X};"
-        else:
-            stmt = f"{signal} = 1'b{value};"
-        self.log_stmt(stmt)
-
-    def clock_edge(self, clk_name: str = "rd_clk_i"):
-        self.log_stmt(f"@(posedge {clk_name});")
-
-    def delay_ns(self, ns: int):
-        self.log_stmt(f"#{ns};")
-
-    def check(self, cycle: int, addr_pipe: int, got_sig: str, exp_val: int, hex_w: int):
-        stmt = (
-            f"if ({got_sig} !== {hex_w * 4}'h{exp_val:0{hex_w}X}) begin\n"
-            f'        $display("[{self.tc_name}] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x{exp_val:0{hex_w}X}", {cycle}, {addr_pipe}, {got_sig});\n'
-            f"        errors++;\n"
-            f"    end"
-        )
-        self.log_stmt(stmt)
-
-    def save(self):
-        if not self.enabled:
-            return
-        os.makedirs(self.out_dir, exist_ok=True)
-        path = os.path.join(self.out_dir, f"{self.tc_name.lower()}_trace.v")
-        self.trace_lines.append("endtask\n")
-        with open(path, "w") as f:
-            f.write("\n".join(self.trace_lines))
-        cocotb.log.info(f"[{self.tc_name}] Verilog trace written to: {path}")
 
 
 # ── Cycle-by-Cycle Monitor & Matrix Generator (UVM/TLM approach)
