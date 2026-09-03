@@ -291,7 +291,7 @@ all_configs: $(ALL_CONFIGS)
 #   make summary MD=1       — also writes results/summary.md
 .PHONY: summary
 summary:
-	@python3 $(CURDIR)/../scripts/summarize.py $(if $(MD),$(RESULTS_DIR)/summary.md)
+	@IP_ROOT=$(CURDIR) python3 $(CURDIR)/../scripts/summarize.py $(if $(MD),$(RESULTS_DIR)/summary.md)
 
 # ── drc ───────────────────────────────────────────────────────────────────────
 # TG-10: DRC and Parameter Validation tests.
@@ -312,11 +312,11 @@ drc:
 # Writes results/summary.md at the end.
 #   make test
 .PHONY: test
-test: | $(RESULTS_DIR)
+test: | results_dir
 	@for g in 1 2 3 4 5 6 7 8 9 10 11; do \
 	    IP_ROOT=$(CURDIR) python3 $(CURDIR)/../scripts/run_tc.py G$$g || true; \
 	done
-	@python3 $(CURDIR)/../scripts/summarize.py $(RESULTS_DIR)/summary.md
+	@IP_ROOT=$(CURDIR) python3 $(CURDIR)/../scripts/summarize.py $(RESULTS_DIR)/summary.md
 	@echo ""
 	@echo "Summary written to $(RESULTS_DIR)/summary.md"
 

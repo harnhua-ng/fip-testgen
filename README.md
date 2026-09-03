@@ -37,6 +37,7 @@ Each IP directory follows the same layout:
 │   ├── tb_<ip>.py        # CoCoTB test functions (generated from test plan)
 │   └── test_drc.py       # DRC parameter validation (pytest, no simulator)
 ├── testbench/            # Verilog top-level testbench wrapper
+├── proj/                 # Radiant project (.rdf + impl/) — created by make prj_create (git-ignored)
 ├── results/              # Simulation outputs (git-ignored)
 └── sim_build/            # CoCoTB/QuestaSim build artifacts (git-ignored)
 ```
@@ -47,7 +48,7 @@ Each IP directory follows the same layout:
 
 | IP | RTL Module | Test Plan | Status |
 |---|---|---|---|
-| `ebr_rom` | `lscc_rom` | `docs/ROM_LIFCL_testplan.md` | Complete — TG-01 through TG-10 (63 TCs) |
+| `ebr_rom` | `lscc_rom` | `docs/ROM_TestPlan_LIFCL.md` | Complete — G1 through G11 (34 TCs, TC-ROM-001 through TC-ROM-034) |
 | `fifo_dc` | `lscc_fifo_dc` | `docs/FIFO_DC_LIFCL_TestPlan_20260801.md` | In progress |
 | `pll` | `lscc_pll` | `docs/pll_lifcl_testplan.md` | In progress |
 
@@ -87,19 +88,42 @@ Settings are resolved in this order (highest to lowest priority):
 ### ebr_rom
 
 Uses `scripts/run_tc.py` to map TC IDs to simulation parameters and invoke `make sim`.
+Test cases are named TC-ROM-001 through TC-ROM-034, grouped into G1 through G11.
 
 ```bash
 cd ebr_rom/
 
-make tc-01-01          # Run one test case
-make tg-01             # Run all TCs in Test Group 01
-make tg-10             # DRC parameter checks via pytest (no simulator)
-make drc               # Alias for make tg-10
-make all_configs       # Full parameter sweep across all configurations
+make test              # Run all groups G1..G11 and write results/summary.md
+make tc-rom-001        # Run one test case by full ID
+make tc-rom-012        # Run TC-ROM-012 (output register disabled)
+make tg-01             # Run all TCs in Group 1 (Baseline)
+make g1                # Alias for make tg-01
+make g11               # DRC parameter checks via pytest (no simulator)
+make drc               # Alias for make g11
+make all_configs       # Parameter sweep across the 15 named configurations
 make summary           # Print pass/fail table from results/*.log
 make summary MD=1      # Also write results/summary.md
 make clean             # Remove results/, sim_build/, QuestaSim artifacts
+make prj_create        # Generate Radiant .rdf project in proj/
+make prj_compile       # Run Radiant PAR on proj/lscc_rom.rdf
+make clean_prj         # Remove the proj/ directory
 ```
+
+Test group reference:
+
+| Group | Subject | TCs |
+|---|---|---|
+| G1 | Baseline | TC-ROM-001 |
+| G2 | `RADDR_DEPTH` | TC-ROM-002 to 006 |
+| G3 | `RDATA_WIDTH` | TC-ROM-007 to 010 |
+| G4 | `REGMODE` | TC-ROM-011 to 012 |
+| G5 | `RESETMODE` | TC-ROM-013 to 014 |
+| G6 | `INIT_FILE_FORMAT` | TC-ROM-015 to 016 |
+| G7 | `OUTPUT_CLK_EN` | TC-ROM-017 to 018 |
+| G8 | `user_init_file` content | TC-ROM-019 |
+| G9 | Cross-parameter combinations | TC-ROM-020 to 023 |
+| G10 | Port behaviour | TC-ROM-024 to 030 |
+| G11 | DRC & Radiant smoke tests | TC-ROM-031 to 034 |
 
 When a TC fails on a TTY, the dispatcher prompts for a failure label:
 
@@ -155,8 +179,8 @@ All outputs land in `<ip>/results/`:
 
 | Artifact | Path | Notes |
 |---|---|---|
-| Simulation log | `results/tc-XX-YY.log` | Full QuestaSim transcript |
-| Waveform | `results/tc-XX-YY.wlf` | Open with `vsim -view results/tc-XX-YY.wlf` |
+| Simulation log | `results/tc-rom-XXX.log` (ebr_rom) / `results/tc-NNN.log` (others) | Full QuestaSim transcript |
+| Waveform | `results/tc-rom-XXX.wlf` | Open with `vsim -view results/tc-rom-001.wlf` |
 | Verilog trace | `results/<tc-name>_trace.v` | Standalone stimulus/check task — all IPs |
 | Failure log | `results/failure_log.md` | Labeled failure history written by `run_tc.py` |
 | Summary table | `results/summary.md` | Written by `make summary MD=1` |
@@ -172,7 +196,7 @@ replay a testcase in a standalone QuestaSim session without Python or CoCoTB.
 
 | IP | Example TC | Trace file |
 |---|---|---|
-| `ebr_rom` | TC-01-01 | `results/tc-01-01_trace.v` |
+| `ebr_rom` | TC-ROM-001 | `results/tc-rom-001_trace.v` |
 | `fifo_dc` | TC-003 | `results/tc-003_trace.v` |
 | `pll` | TC-LIFCL-002 | `results/tc-lifcl-002_trace.v` |
 
@@ -180,16 +204,16 @@ replay a testcase in a standalone QuestaSim session without Python or CoCoTB.
 
 ```verilog
 // ============================================================================
-// Verilog Stimulus & Check Trace: TC-01-01
+// Verilog Stimulus & Check Trace: TC-ROM-001
 // Auto-generated at runtime by VerilogTracer (scripts/verilog_tracer.py)
 // ============================================================================
-task automatic run_tc_01_01_trace;
+task automatic run_tc_rom_001_trace;
     // stimulus and $display checks recorded during the CoCoTB run
     @(posedge rd_clk_i);
-    rd_addr_i = 9'h000;
+    rd_addr_i = 10'h000;
     // ...
-    if (rd_data_o !== 36'hXXXXXXXXX) begin
-        $display("[TC-01-01] cycle N: got=0x%0X exp=0xXXX", rd_data_o);
+    if (rd_data_o !== 18'hXXXXX) begin
+        $display("[TC-ROM-001] cycle N: got=0x%0X exp=0xXXX", rd_data_o);
         errors++;
     end
 endtask
@@ -201,14 +225,14 @@ endtask
 2. `` `include `` the trace file in a thin Verilog wrapper:
 
 ```verilog
-`include "results/tc-01-01_trace.v"
+`include "results/tc-rom-001_trace.v"
 
 module replay_tb;
     integer errors = 0;
     // instantiate DUT here ...
 
     initial begin
-        run_tc_01_01_trace;
+        run_tc_rom_001_trace;
         if (errors == 0)
             $display("PASS");
         else
@@ -286,5 +310,6 @@ Use `ebr_rom/` as the reference. Minimum steps:
 6. Add named `make tc-NNN` convenience targets for the most frequently run testcases.
 
 If the IP follows the same numbered TC structure as ebr_rom, extend `scripts/run_tc.py`
-with a `TC_MAP` and `TG_MAP` for the new IP and add `tc-%` / `tg-%` wildcard targets to
-its Makefile (see `ebr_rom/Makefile` lines 504–508).
+with a `TC_MAP` and `TG_MAP` for the new IP and add `tc-%` / `tg-%` / `g%` wildcard
+targets to its Makefile (see `ebr_rom/Makefile`, the `tc-%` / `tg-%` / `g%` pattern
+rules near the bottom of the TC/TG named targets section).
