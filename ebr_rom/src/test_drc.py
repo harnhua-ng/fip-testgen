@@ -1,54 +1,65 @@
 """
-TG-10 — DRC and Parameter Validation  (TC-10-01 … TC-10-09)
+test_drc.py — G11 DRC & Parameter Validation Tests
+Spec ref   : ROM_FunctionalSpec.md (v2.5.0, 2026-08-20)
+Test plan  : ROM_TestPlan_LIFCL.md (2026-08-27)
 
-Verify that the lscc_rom IP plugin enforces all dependency rules at
-configuration time.
-
-The Radiant IP generator runs DRC checks outside the RTL simulator, so
-these tests exercise a Python model of the same constraints.  The model
-is derived from the LIFCL EBR tile specification and must stay in sync
-with the plugin source whenever the plugin rules change.
-
-Run without a simulator:
-
+Validates lscc_rom configuration parameters against LIFCL EBR DRC rules (DRC-1 through DRC-14).
+Run with:
     pytest src/test_drc.py -v
-
-Pass/fail criteria (per Section 8.2 of the testplan):
-    PASS — the plugin correctly rejects the invalid configuration and the
-           expected error string appears in the diagnostic message.
-    FAIL — the invalid configuration is accepted, or a different error
-           message is emitted.
 """
 
+import math
 import re
 import pytest
 
-
-# ─── LIFCL EBR tile constraints ──────────────────────────────────────────────
-
-_RADDR_DEPTH_MIN  = 2
-_RADDR_DEPTH_MAX  = 65_536
-_RDATA_WIDTH_MIN  = 1
-_RDATA_WIDTH_MAX  = 512
-_MAX_TOTAL_BITS   = 1_548_288          # 43 LIFCL EBR tiles × 36 Kbits each
+# ─── LIFCL Constraints & Reference Limits ─────────────────────────────────────
+_RADDR_DEPTH_MIN = 2
+_RADDR_DEPTH_MAX = 65_536
+_RDATA_WIDTH_MIN = 1
+_RDATA_WIDTH_MAX = 512
+_MAX_TOTAL_BITS  = 1_548_288  # 84 EBR blocks × 18,432 bits on LIFCL
 _ECC_VALID_WIDTHS = frozenset({32, 64})
 
 
+def clog2(n: int) -> int:
+    """Calculates ceil(log2(n)) with lower bound check."""
+    if n < 1:
+        raise ValueError("Invalid input to clog2: value must be >= 1")
+    if n == 1:
+        return 1
+    return (n - 1).bit_length()
+
+
+def derive_total_memory_bits(depth: int, width: int) -> int:
+    return depth * width
+
+
+def derive_addr_width(depth: int) -> int:
+    return clog2(depth)
+
+
+def derive_mem_size(depth: int, width: int) -> str:
+    return f"{width},{depth}"
+
+
+def is_init_data_update_visible(family: str) -> bool:
+    return family.upper() == "LAV-AT"
+
+
 def check_lscc_rom_params(
-    rdata_width   = 36,
-    raddr_depth   = 512,
-    regmode       = "noreg",
-    resetmode     = "sync",
-    output_clk_en = 0,
-    ecc_enable    = 0,
-    init_mode     = "all_one",
-    init_file     = "-",
+    rdata_width: int = 18,
+    raddr_depth: int = 1024,
+    regmode: str = "reg",
+    resetmode: str = "sync",
+    output_clk_en: int = 0,
+    ecc_enable: int = 0,
+    init_mode: str = "mem_file",
+    init_file: str = "rom_1024x18.bin",
+    family: str = "LIFCL",
 ):
     """
-    Validate lscc_rom configuration parameters against LIFCL EBR DRC rules.
-
-    Raises ValueError with the plugin error message when any rule is violated.
-    Returns None when all parameters are valid.
+    Validates lscc_rom configuration parameters against LIFCL EBR DRC rules.
+    Raises ValueError with descriptive error message on violation.
     """
     if not (_RADDR_DEPTH_MIN <= raddr_depth <= _RADDR_DEPTH_MAX):
         raise ValueError("Address depth is out of range!")
@@ -82,123 +93,130 @@ def check_lscc_rom_params(
     if init_mode == "mem_file" and (not init_file or init_file.strip() in ("", "-")):
         raise ValueError("Initialization file is mandatory when INIT_MODE is mem_file")
 
+    return True
 
-# ─── TC-10-01 ────────────────────────────────────────────────────────────────
 
-def test_tc_10_01_depth_below_minimum():
-    """TC-10-01: RADDR_DEPTH=1 is below the minimum of 2."""
-    with pytest.raises(ValueError, match=re.escape("Address depth is out of range!")):
+# ─── DRC Rule Tests (DRC-1 through DRC-14) ────────────────────────────────────
+
+def test_drc_01_total_memory_budget_limit():
+    """DRC-1 / Rule 1: check_addr_depth_data_width bounds."""
+    # Exact limit on LIFCL: 3024 * 512 = 1,548,288
+    assert check_lscc_rom_params(raddr_depth=3024, rdata_width=512) is True
+    # Over limit
+    with pytest.raises(ValueError, match="Total memory size exceeds the resource limitation"):
+        check_lscc_rom_params(raddr_depth=3025, rdata_width=512)
+
+
+def test_drc_02_raddr_depth_range():
+    """DRC-2 / Rule 2: RADDR_DEPTH must be in [2, 65536]."""
+    assert check_lscc_rom_params(raddr_depth=2, rdata_width=1) is True
+    assert check_lscc_rom_params(raddr_depth=65536, rdata_width=18) is True
+
+    with pytest.raises(ValueError, match="Address depth is out of range!"):
         check_lscc_rom_params(raddr_depth=1)
 
-
-# ─── TC-10-02 ────────────────────────────────────────────────────────────────
-
-def test_tc_10_02_depth_above_maximum():
-    """TC-10-02: RADDR_DEPTH=65537 exceeds the maximum of 65536."""
-    with pytest.raises(ValueError, match=re.escape("Address depth is out of range!")):
-        check_lscc_rom_params(raddr_depth=65_537)
+    with pytest.raises(ValueError, match="Address depth is out of range!"):
+        check_lscc_rom_params(raddr_depth=65537)
 
 
-# ─── TC-10-03 ────────────────────────────────────────────────────────────────
+def test_drc_03_04_rdata_width_range():
+    """DRC-3 / DRC-4 / Rules 3, 4: RDATA_WIDTH must be in [1, 512]."""
+    assert check_lscc_rom_params(rdata_width=1, raddr_depth=1024) is True
+    assert check_lscc_rom_params(rdata_width=512, raddr_depth=2048) is True
 
-def test_tc_10_03_width_below_minimum():
-    """TC-10-03: RDATA_WIDTH=0 is below the minimum of 1."""
-    with pytest.raises(ValueError, match=re.escape("Data width is out of range!")):
+    with pytest.raises(ValueError, match="Data width is out of range!"):
         check_lscc_rom_params(rdata_width=0)
 
-
-# ─── TC-10-04 ────────────────────────────────────────────────────────────────
-
-def test_tc_10_04_width_above_maximum():
-    """TC-10-04: RDATA_WIDTH=513 exceeds the maximum of 512."""
-    with pytest.raises(ValueError, match=re.escape("Data width is out of range!")):
+    with pytest.raises(ValueError, match="Data width is out of range!"):
         check_lscc_rom_params(rdata_width=513)
 
 
-# ─── TC-10-05 ────────────────────────────────────────────────────────────────
-
-def test_tc_10_05_total_bits_exceed_limit():
-    """TC-10-05: RDATA_WIDTH=512, RADDR_DEPTH=4096 → 2,097,152 bits > 1,548,288."""
-    with pytest.raises(ValueError, match="Total memory size exceeds the resource limitation"):
-        check_lscc_rom_params(rdata_width=512, raddr_depth=4_096)
-
-
-# ─── TC-10-06 ────────────────────────────────────────────────────────────────
-
-def test_tc_10_06_output_clk_en_without_reg():
-    """TC-10-06: OUTPUT_CLK_EN=1 requires REGMODE=reg; rejected when REGMODE=noreg."""
-    with pytest.raises(
-        ValueError,
-        match=re.escape(
-            "Enable Output ClockEn is turned on, while Enable Output Register is turned off"
-        ),
-    ):
+def test_drc_05_06_output_clk_en_dependency():
+    """DRC-5 / DRC-6 / Rules 5, 6: OUTPUT_CLK_EN=True requires REGMODE=reg."""
+    assert check_lscc_rom_params(output_clk_en=1, regmode="reg") is True
+    with pytest.raises(ValueError, match="Enable Output ClockEn is turned on, while Enable Output Register is turned off"):
         check_lscc_rom_params(output_clk_en=1, regmode="noreg")
 
 
-# ─── TC-10-07 ────────────────────────────────────────────────────────────────
-
-def test_tc_10_07_async_reset_without_reg():
-    """TC-10-07: RESETMODE=async requires REGMODE=reg; rejected when REGMODE=noreg."""
-    with pytest.raises(
-        ValueError,
-        match=re.escape(
-            "Reset assertion is set to async, while Enable Output Register is turned off"
-        ),
-    ):
+def test_drc_07_08_resetmode_dependency():
+    """DRC-7 / DRC-8 / Rules 7, 8: RESETMODE=async requires REGMODE=reg."""
+    assert check_lscc_rom_params(resetmode="async", regmode="reg") is True
+    with pytest.raises(ValueError, match="Reset assertion is set to async, while Enable Output Register is turned off"):
         check_lscc_rom_params(resetmode="async", regmode="noreg")
 
 
-# ─── TC-10-08 ────────────────────────────────────────────────────────────────
-
-def test_tc_10_08_ecc_unsupported_width():
-    """TC-10-08: ECC_ENABLE=1 with RDATA_WIDTH=65 is rejected (only 32 and 64 are valid)."""
-    with pytest.raises(ValueError, match="ECC is not supported for RDATA_WIDTH=65"):
-        check_lscc_rom_params(ecc_enable=1, rdata_width=65)
-
-
-# ─── TC-10-09 ────────────────────────────────────────────────────────────────
-
-def test_tc_10_09_mem_file_without_path():
-    """TC-10-09: INIT_MODE=mem_file with no init file path ("-") is rejected."""
+def test_drc_09_chk_file_mandatory():
+    """DRC-9 / Rule 9: chk_file requires a named file when init_mode=mem_file."""
+    assert check_lscc_rom_params(init_mode="mem_file", init_file="rom_1024x18.bin") is True
     with pytest.raises(ValueError, match="Initialization file is mandatory"):
         check_lscc_rom_params(init_mode="mem_file", init_file="-")
+    with pytest.raises(ValueError, match="Initialization file is mandatory"):
+        check_lscc_rom_params(init_mode="mem_file", init_file="")
 
 
-# ─── boundary / sanity checks (not in test plan, confirm model correctness) ──
+def test_drc_10_addr_width_derivation():
+    """DRC-10 / Rule 10: Derived address width by clog2."""
+    assert derive_addr_width(2) == 1
+    assert derive_addr_width(1000) == 10
+    assert derive_addr_width(1024) == 10
+    assert derive_addr_width(2048) == 11
+    assert derive_addr_width(3024) == 12
+    assert derive_addr_width(65536) == 16
+
+
+def test_drc_12_total_memory_bits_derivation():
+    """DRC-12 / Rule 15: Total Memory bits derivation."""
+    assert derive_total_memory_bits(1024, 18) == 18432
+    assert derive_total_memory_bits(3024, 512) == 1548288
+    assert derive_total_memory_bits(1000, 8) == 8000
+    assert derive_total_memory_bits(2, 1) == 2
+
+
+def test_drc_13_init_data_update_visibility():
+    """DRC-13 / Rules 17, 18: Initialization data update visibility."""
+    assert is_init_data_update_visible("LIFCL") is False
+    assert is_init_data_update_visible("LFCPNX") is False
+    assert is_init_data_update_visible("LAV-AT") is True
+
+
+def test_drc_14_derived_readonly_settings():
+    """DRC-14 / Rules 13, 14, 16, 19: Derived read-only settings."""
+    assert derive_mem_size(1000, 8) == "8,1000"
+    assert derive_mem_size(1024, 18) == "18,1024"
+    assert derive_mem_size(512, 36) == "36,512"
+
+
+# ─── Boundary Validation Class ────────────────────────────────────────────────
 
 class TestBoundaryValid:
-    """Verify that valid edge-case configurations are accepted without error."""
+    """Verify that all legal configurations in the testplan pass DRC."""
 
-    def test_depth_minimum_boundary(self):
-        check_lscc_rom_params(raddr_depth=2, rdata_width=1)
+    def test_tc_rom_001_params(self):
+        check_lscc_rom_params(raddr_depth=1024, rdata_width=18, regmode="reg", resetmode="sync", output_clk_en=0)
 
-    def test_depth_maximum_boundary(self):
-        # 1 bit × 65536 = 65536 bits ≪ limit
-        check_lscc_rom_params(raddr_depth=65_536, rdata_width=1)
+    def test_tc_rom_002_params(self):
+        check_lscc_rom_params(raddr_depth=2, rdata_width=1, regmode="reg", resetmode="sync", output_clk_en=0)
 
-    def test_width_minimum_boundary(self):
-        check_lscc_rom_params(rdata_width=1, raddr_depth=2)
+    def test_tc_rom_005_params(self):
+        check_lscc_rom_params(raddr_depth=3024, rdata_width=512, regmode="reg", resetmode="sync", output_clk_en=0)
 
-    def test_width_maximum_within_bit_limit(self):
-        # 512 bits × 2 = 1024 bits ≪ limit
-        check_lscc_rom_params(rdata_width=512, raddr_depth=2)
+    def test_tc_rom_007_params(self):
+        check_lscc_rom_params(raddr_depth=1024, rdata_width=1, regmode="reg", resetmode="sync", output_clk_en=0)
 
-    def test_total_bits_at_limit(self):
-        # 36 × 43008 = 1,548,288 exactly — should be accepted
-        check_lscc_rom_params(rdata_width=36, raddr_depth=43_008)
+    def test_tc_rom_009_params(self):
+        check_lscc_rom_params(raddr_depth=2048, rdata_width=512, regmode="reg", resetmode="sync", output_clk_en=0)
 
-    def test_output_clk_en_with_reg(self):
-        check_lscc_rom_params(output_clk_en=1, regmode="reg")
+    def test_tc_rom_012_params(self):
+        check_lscc_rom_params(raddr_depth=1024, rdata_width=18, regmode="noreg", resetmode="sync", output_clk_en=0)
 
-    def test_async_reset_with_reg(self):
-        check_lscc_rom_params(resetmode="async", regmode="reg")
+    def test_tc_rom_013_params(self):
+        check_lscc_rom_params(raddr_depth=1024, rdata_width=18, regmode="reg", resetmode="sync", output_clk_en=1)
 
-    def test_ecc_width_32(self):
-        check_lscc_rom_params(ecc_enable=1, rdata_width=32)
+    def test_tc_rom_014_params(self):
+        check_lscc_rom_params(raddr_depth=1024, rdata_width=18, regmode="reg", resetmode="async", output_clk_en=0)
 
-    def test_ecc_width_64(self):
-        check_lscc_rom_params(ecc_enable=1, rdata_width=64)
+    def test_tc_rom_021_params(self):
+        check_lscc_rom_params(raddr_depth=2048, rdata_width=512, regmode="noreg", resetmode="sync", output_clk_en=0)
 
-    def test_mem_file_with_valid_path(self):
-        check_lscc_rom_params(init_mode="mem_file", init_file="testbench/rom_init.hex")
+    def test_tc_rom_023_params(self):
+        check_lscc_rom_params(raddr_depth=2, rdata_width=1, regmode="noreg", resetmode="sync", output_clk_en=0)

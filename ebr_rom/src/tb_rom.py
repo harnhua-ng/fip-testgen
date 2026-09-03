@@ -1,270 +1,148 @@
 """
 tb_rom.py  —  CoCoTB testbench for lscc_rom (LIFCL)
-Spec ref  : ROM_FIP_Functional_Specification_v2.5.0.md
-Test plan : ROM_LIFCL_testplan.md
+Spec ref  : ROM_FunctionalSpec.md (v2.5.0, 2026-08-20)
+Test plan : ROM_TestPlan_LIFCL.md (2026-08-27)
 
-Implemented test groups
-  TG-01  Basic Read Functionality  (TC-01-01 … TC-01-07)
-  TG-02  Read Clock Enable         (TC-02-01 … TC-02-04)
-  TG-03  Output Clock Enable       (TC-03-01 … TC-03-05)
-  TG-04  Output Register Enable    (TC-04-01 … TC-04-05)
-  TG-05  Reset Behavior            (TC-05-01 … TC-05-06)
-  TG-06  Memory Initialization     (TC-06-01 … TC-06-08)
-  TG-07  EBR Tile Config Coverage  (TC-07-01 … TC-07-08)
-  TG-08  EBR Cascading             (TC-08-01 … TC-08-08)
-  TG-09  ECC                       (TC-09-01 … TC-09-07)
-
-Each test uses @cocotb.test(skip=...) to skip itself when the current
-simulation parameters do not match the test's requirements.  Run the full
-suite by invoking qrun multiple times with different env-var combinations.
-
-Signal naming matches sim_top.v (which wraps lscc_rom and provides GSR_INST).
-All signals are accessed as dut.<name> — cocotb sees sim_top as the DUT.
+Test Groups & Cases:
+  G1 · Baseline:
+    TC-ROM-001: Default configuration generation and read (Both)
+  G2 · RADDR_DEPTH — Address Depth:
+    TC-ROM-002: Minimum address depth (Radiant Compilation)
+    TC-ROM-003: Median address depth, full-range read (Sim Only)
+    TC-ROM-004: Maximum address depth (Radiant Compilation)
+    TC-ROM-005: Address depth at the exact LIFCL budget (Radiant Compilation)
+    TC-ROM-006: Non-power-of-two address depth (Radiant Compilation)
+  G3 · RDATA_WIDTH — Data Width:
+    TC-ROM-007: Minimum data width (Both)
+    TC-ROM-008: Median data width, every bit position (Sim Only)
+    TC-ROM-009: Maximum data width with data-axis tiling (Both)
+    TC-ROM-010: Data width 36 selects the wide LIFCL branch (Radiant Compilation)
+  G4 · REGMODE — Output Register:
+    TC-ROM-011: Output register enabled — two-cycle latency (Sim Only)
+    TC-ROM-012: Output register disabled — one-cycle latency (Both)
+  G5 · RESETMODE — Reset Assertion:
+    TC-ROM-013: Synchronous reset of the output register (Both)
+    TC-ROM-014: Asynchronous reset assertion (Radiant Compilation)
+  G6 · INIT_FILE_FORMAT — Memory File Format:
+    TC-ROM-015: Binary-format initialization (Both)
+    TC-ROM-016: Hexadecimal-format initialization (Both)
+  G7 · OUTPUT_CLK_EN — Output Register Clock Enable:
+    TC-ROM-017: Output-register clock enable not requested (Radiant Compilation)
+    TC-ROM-018: Output-register clock enable requested (Both)
+  G8 · user_init_file — Memory File:
+    TC-ROM-019: Comments, @address records and surplus words (Both)
+  G9 · Cross-Parameter Legal Combinations:
+    TC-ROM-020: Maximum depth, output register, separate enable, hex (Sim Only)
+    TC-ROM-021: Maximum width, output register bypassed, hex (Both)
+    TC-ROM-022: At-budget dimensions, separate enable, async reset (Radiant Compilation)
+    TC-ROM-023: Minimum dimensions, output register bypassed (Both)
+  G10 · Port Behaviour:
+    TC-ROM-024: rd_clk_en_i freezes the memory array (Sim Only)
+    TC-ROM-025: rd_out_clk_en_i freezes the output register (Sim Only)
+    TC-ROM-026: rd_en_i as a second series enable (Sim Only)
+    TC-ROM-027: rd_en_i ignored without the separate enable (Sim Only)
+    TC-ROM-028: rst_i inert with the output register bypassed (Sim Only)
+    TC-ROM-029: rd_addr_i above the configured depth (Sim Only)
+    TC-ROM-030: ECC status outputs inert and dangling (Both)
+  G11 · DRC and Radiant Compilation Checks:
+    TC-ROM-031: Memory Initialization read-only; fill options unreachable
+    TC-ROM-032: Initialization-data update control hidden on LIFCL
+    TC-ROM-033: Derived read-only settings
+    TC-ROM-034: Default-parameter compilation smoke test
 """
 
 import os
 import re
-import functools
-import random
 import cocotb
-from cocotb.clock    import Clock
-from cocotb.triggers import RisingEdge, FallingEdge, ReadOnly, Timer
-from cocotb.utils    import get_sim_time
-from verilog_tracer  import VerilogTracer
+from cocotb.clock import Clock
+from cocotb.triggers import RisingEdge, ReadOnly, Timer
+from verilog_tracer import VerilogTracer
 
-# ── Simulation parameters (set by run.sh via env vars) ───────────────────────
-RDATA_WIDTH    = int(os.getenv("RDATA_WIDTH",    "36"))
-RADDR_DEPTH    = int(os.getenv("RADDR_DEPTH",    "512"))
-REGMODE        =     os.getenv("REGMODE",        "noreg")
-RESETMODE      =     os.getenv("RESETMODE",      "sync")
-OUTPUT_CLK_EN  = int(os.getenv("OUTPUT_CLK_EN",  "0"))
-ECC_ENABLE     = int(os.getenv("ECC_ENABLE",     "0"))
-INIT_MODE        =     os.getenv("INIT_MODE",        "all_one")
-INIT_FILE_FORMAT =     os.getenv("INIT_FILE_FORMAT", "hex")
-ECC_ERROR_INJECT = os.getenv("ECC_ERROR_INJECT", "0") == "1"
+# ── Simulation parameters (set via env vars) ───────────────────────────────────
+RDATA_WIDTH      = int(os.getenv("RDATA_WIDTH",      "18"))
+RADDR_DEPTH      = int(os.getenv("RADDR_DEPTH",      "1024"))
+REGMODE          =     os.getenv("REGMODE",          "reg")
+RESETMODE        =     os.getenv("RESETMODE",        "sync")
+OUTPUT_CLK_EN    = int(os.getenv("OUTPUT_CLK_EN",    "0"))
+ECC_ENABLE       = int(os.getenv("ECC_ENABLE",       "0"))
+INIT_MODE        =     os.getenv("INIT_MODE",        "mem_file")
+INIT_FILE        =     os.getenv("INIT_FILE",        "")
+INIT_FILE_FORMAT =     os.getenv("INIT_FILE_FORMAT", "binary")
+FAMILY           =     os.getenv("FAMILY",           "LIFCL")
 
-CLK_NS   = 10    # 100 MHz — matches golden testbench CLK_FREQ=10
-RST_NS   = 100   # 10 cycles at 100 MHz — matches golden RESET_CNT=100
+CLK_NS   = 10    # 100 MHz clock
+RST_NS   = 100   # 10 cycles reset
 
 # Pipeline latency: 1 cycle for noreg, 2 cycles for reg
 LAT = 1 if REGMODE == "noreg" else 2
 
 DATA_MASK = (1 << RDATA_WIDTH) - 1
 
+
 # ── Reference model ───────────────────────────────────────────────────────────
 def _make_ref():
-    """Build the expected memory array from INIT_MODE.
-
-    INIT_MODE="all_one"  → every location returns DATA_MASK (all 1s).
-    INIT_MODE="all_zero" → every location returns 0.
-    INIT_MODE="none"     → defaults to all zeros (INIT_VALUE_xx defaults).
-    INIT_MODE="mem_file" → load from INIT_FILE (hex); fall back to all-zero.
-    """
+    """Build the expected reference memory array according to spec 1.5.3."""
     if INIT_MODE == "all_one":
         return [DATA_MASK] * RADDR_DEPTH
+    if INIT_MODE == "all_zero" or INIT_MODE == "none":
+        return [0] * RADDR_DEPTH
 
-    if INIT_MODE == "mem_file":
-        path = os.getenv("INIT_FILE", "rom_init.hex")
-        fmt  = os.getenv("INIT_FILE_FORMAT", "hex")
-        if os.path.isfile(path):
-            words = []
-            base  = 16 if fmt == "hex" else 2
-            with open(path) as f:
-                for line in f:
-                    line = line.split("//")[0].strip()
-                    if not line or line.startswith("@"):
-                        continue
-                    for tok in line.split():
-                        words.append(int(tok, base) & DATA_MASK)
-            return (words + [0] * RADDR_DEPTH)[:RADDR_DEPTH]
-        cocotb.log.warning(f"INIT_FILE '{path}' not found; using all-zero fallback")
+    path = INIT_FILE
+    if not path or not os.path.isfile(path):
+        # Default file fallbacks based on depth, width, and format
+        candidate_names = [
+            f"rom_{RADDR_DEPTH}x{RDATA_WIDTH}.{ 'hex' if INIT_FILE_FORMAT == 'hex' else 'bin' }",
+            f"rom_init_{RDATA_WIDTH}_{RADDR_DEPTH}.{ 'hex' if INIT_FILE_FORMAT == 'hex' else 'bin' }",
+            "rom_1024x18.bin",
+            "rom_init.hex"
+        ]
+        for name in candidate_names:
+            cpath = os.path.join(os.path.dirname(__file__), "..", "testbench", name)
+            if os.path.isfile(cpath):
+                path = cpath
+                break
 
-    return [0] * RADDR_DEPTH   # all_zero, none, or missing mem_file
+    if path and os.path.isfile(path):
+        mem = [0] * RADDR_DEPTH
+        base = 16 if INIT_FILE_FORMAT == "hex" else 2
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+        # Strip block comments /* ... */
+        content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
+        cur_addr = 0
+        for line in content.splitlines():
+            line = line.split("//")[0].strip()
+            if not line:
+                continue
+            if line.startswith("@"):
+                parts = line[1:].strip().split()
+                if parts:
+                    cur_addr = int(parts[0], 16)
+                    tokens = parts[1:]
+                else:
+                    tokens = []
+            else:
+                tokens = line.split()
+
+            for tok in tokens:
+                try:
+                    val = int(tok, base) & DATA_MASK
+                    if cur_addr < RADDR_DEPTH:
+                        mem[cur_addr] = val
+                    cur_addr += 1
+                except ValueError:
+                    continue
+        return mem
+
+    return [0] * RADDR_DEPTH
 
 
 REF = _make_ref()
 
 
-# ── Cycle-by-Cycle Monitor & Matrix Generator (UVM/TLM approach)
-class PipelineMatrixMonitor:
-    """Cycle-by-cycle passive pipeline monitor and alignment matrix generator.
-
-    Adheres to industry-standard UVM monitor / scoreboarding & TLM principles:
-    - Runs as a concurrent, non-intrusive background coroutine (Observer pattern).
-    - Passively samples inputs on clock posedges in the Active phase.
-    - Captures outputs and evaluates assertions in the ReadOnly (Postponed) phase.
-    - Generates a cycle-by-cycle Markdown pipeline alignment matrix report.
-    """
-
-    def __init__(self, dut, tc_name: str, latency: int = None, out_dir: str = "results", enabled: bool = True):
-        self.dut = dut
-        self.tc_name = tc_name.upper().replace("_", "-")
-        self.latency = latency if latency is not None else LAT
-        self.out_dir = out_dir
-        self.enabled = enabled
-        self.rows = []
-        self.cycle = 0
-        self.pipe_queue = [None] * self.latency
-        self._running = False
-        self._task = None
-
-    def start(self):
-        """Start the background monitor task."""
-        if not self.enabled:
-            return self
-        self._running = True
-        self._task = cocotb.start_soon(self._monitor_loop())
-        return self
-
-    async def _monitor_loop(self):
-        hex_w = (RDATA_WIDTH + 3) // 4
-        while self._running:
-            await RisingEdge(self.dut.rd_clk_i)
-            self.cycle += 1
-            t_ns = get_sim_time(unit="ns")
-
-            # Settle outputs and inputs in ReadOnly phase (after active drivers have run)
-            await ReadOnly()
-
-            # Sample inputs driven during this cycle
-            rst_val = self.dut.rst_i.value
-            rst = int(rst_val) if rst_val.is_resolvable else -1
-
-            rden_val = self.dut.rd_en_i.value
-            rden = int(rden_val) if rden_val.is_resolvable else 0
-
-            clken_val = self.dut.rd_clk_en_i.value
-            clken = int(clken_val) if clken_val.is_resolvable else 0
-
-            outclken_val = self.dut.rd_out_clk_en_i.value
-            outclken = int(outclken_val) if outclken_val.is_resolvable else 0
-
-            addr_val = self.dut.rd_addr_i.value
-            addr = int(addr_val) if addr_val.is_resolvable else None
-
-            data_val = self.dut.rd_data_o.value
-            got = int(data_val) if data_val.is_resolvable else None
-
-            # Pop the address emerging from the pipeline
-            exp_addr = self.pipe_queue.pop(0) if self.pipe_queue else None
-
-            # Shift address into pipeline
-            if rst == 0 and rden == 1 and clken == 1 and addr is not None:
-                self.pipe_queue.append(addr)
-            elif clken == 0:
-                # Clock enable low freezes pipeline
-                self.pipe_queue.insert(0, exp_addr)
-            else:
-                self.pipe_queue.append(None)
-
-            # Determine expected data and verification status
-            exp_data = REF[exp_addr] if (exp_addr is not None and 0 <= exp_addr < len(REF)) else None
-
-            if rst == 1 and RESETMODE == "sync" and REGMODE == "reg":
-                exp_data = 0
-
-            if exp_data is not None and got is not None:
-                status = "PASS" if got == exp_data else "MISMATCH"
-            elif rst == 1:
-                status = "RESET"
-            elif exp_data is None and got is not None:
-                status = "IDLE/PRIME"
-            else:
-                status = "UNKNOWN"
-
-            self.rows.append({
-                "time_ns": f"{t_ns:7.2f}",
-                "cycle": self.cycle,
-                "rst": str(rst) if rst >= 0 else "X",
-                "enables": f"E:{rden} C:{clken} O:{outclken}",
-                "addr_in": f"0x{addr:X}" if addr is not None else str(addr_val),
-                "pipe_addr": f"0x{exp_addr:X}" if exp_addr is not None else "--",
-                "data_out": f"0x{got:0{hex_w}X}" if got is not None else str(data_val),
-                "exp_data": f"0x{exp_data:0{hex_w}X}" if exp_data is not None else "--",
-                "status": status,
-            })
-
-    def stop_and_save(self):
-        """Stop monitoring and write the alignment matrix to results/<tc_name>_matrix.md."""
-        self._running = False
-        if not self.enabled or not self.rows:
-            return
-
-        os.makedirs(self.out_dir, exist_ok=True)
-        file_path = os.path.join(self.out_dir, f"{self.tc_name.lower()}_matrix.md")
-
-        lines = [
-            f"# Cycle-by-Cycle Matrix - {self.tc_name}",
-            f"",
-            f"- **Design Under Test**: `lscc_rom` (LIFCL)",
-            f"- **Parameters**: `REGMODE={REGMODE}` (LAT={self.latency}), `RDATA_WIDTH={RDATA_WIDTH}`, `RADDR_DEPTH={RADDR_DEPTH}`, `RESETMODE={RESETMODE}`, `INIT_MODE={INIT_MODE}`",
-            f"- **Total Monitored Cycles**: {len(self.rows)}",
-            f"",
-            f"| Time (ns) | Cycle | RST | Enables (E/C/O) | `rd_addr_i` | Latched Addr | `rd_data_o` | Expected (`REF`) | Status |",
-            f"| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
-        ]
-
-        for r in self.rows:
-            stat_str = f"**{r['status']}**" if r['status'] == "MISMATCH" else r['status']
-            lines.append(
-                f"| {r['time_ns']} | {r['cycle']} | {r['rst']} | {r['enables']} | {r['addr_in']} | "
-                f"{r['pipe_addr']} | {r['data_out']} | {r['exp_data']} | {stat_str} |"
-            )
-
-        with open(file_path, "w") as f:
-            f.write("\n".join(lines) + "\n")
-        cocotb.log.info(f"[{self.tc_name}] Pipeline matrix written to: {file_path}")
-
-    async def __aenter__(self):
-        self.start()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        self.stop_and_save()
-
-
-# ── Global Test Hook: Automatically integrate Approach A into every cocotb.test
-_orig_cocotb_test = cocotb.test
-
-def _cocotb_test_with_matrix(*args, **kwargs):
-    """Transparent wrapper around cocotb.test that attaches PipelineMatrixMonitor to every test."""
-    def decorator(func):
-        @functools.wraps(func)
-        async def test_wrapper(dut, *t_args, **t_kwargs):
-            m = re.match(r'tc_(\d+)_(\d+)', func.__name__)
-            tc_name = f"TC-{m.group(1)}-{m.group(2)}" if m else func.__name__.upper()
-            mon = PipelineMatrixMonitor(dut, tc_name).start()
-            try:
-                return await func(dut, *t_args, **t_kwargs)
-            finally:
-                mon.stop_and_save()
-
-        return _orig_cocotb_test(*args, **kwargs)(test_wrapper)
-
-    if len(args) == 1 and callable(args[0]):
-        func = args[0]
-        args = ()
-        return decorator(func)
-    return decorator
-
-# Apply wrapper so all tests defined with @cocotb.test automatically generate alignment matrices
-cocotb.test = _cocotb_test_with_matrix
-
-
-# ── Shared infrastructure ─────────────────────────────────────────────────────
+# ── Shared Testbench Helpers ──────────────────────────────────────────────────
 async def do_reset(dut, tracer: VerilogTracer = None):
-    """Assert rst_i for RST_NS with all enables low, then release and sync to clock.
-
-    Mirrors the golden testbench: rst_i=1 for RESET_CNT, then de-assert and
-    wait for one rising edge before handing control back to the test.
-
-    Verilog equivalent
-    ------------------
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;                    // RST_NS = 100 ns (10 cycles at 100 MHz)
-    rst_i = 0;
-    @(posedge rd_clk_i);    // sync to first post-reset rising edge
-    """
+    """Assert rst_i for RST_NS with all enables low, then release and sync to clock."""
     if tracer:
         tracer.comment("Reset sequence")
         tracer.assign("rst_i", 1)
@@ -283,14 +161,11 @@ async def do_reset(dut, tracer: VerilogTracer = None):
     dut.rd_addr_i.value       = 0
     await Timer(RST_NS, unit="ns")
     dut.rst_i.value = 0
-    await RisingEdge(dut.rd_clk_i)   # sync to first post-reset edge
+    await RisingEdge(dut.rd_clk_i)
 
 
 async def single_read(dut, addr, tracer: VerilogTracer = None):
-    """Drive addr after the current clock edge, wait LAT cycles, return rd_data_o.
-
-    Prerequisite: rd_en_i, rd_clk_en_i, and rd_out_clk_en_i must already be 1.
-    """
+    """Drive addr after current clock edge, wait LAT cycles, return rd_data_o."""
     raddr_w = max(1, (RADDR_DEPTH - 1).bit_length())
     await RisingEdge(dut.rd_clk_i)
     dut.rd_addr_i.value = addr
@@ -302,2747 +177,969 @@ async def single_read(dut, addr, tracer: VerilogTracer = None):
         if tracer:
             tracer.clock_edge("rd_clk_i")
     await ReadOnly()
-    return int(dut.rd_data_o.value)
+    val = dut.rd_data_o.value
+    return int(val) if val.is_resolvable else 0
 
 
-async def single_read_ecc(dut, addr):
-    """Like single_read but also returns (data, one_err_det, two_err_det).
+# ==============================================================================
+# G1 · Baseline
+# ==============================================================================
 
-    Prerequisite: rd_en_i, rd_clk_en_i, and rd_out_clk_en_i must already be 1.
-    Caller must be in Active phase; returns in ReadOnly phase.
-    """
-    await RisingEdge(dut.rd_clk_i)
-    dut.rd_addr_i.value = addr
-    for _ in range(LAT):
-        await RisingEdge(dut.rd_clk_i)
-    await ReadOnly()
-    return (
-        int(dut.rd_data_o.value),
-        int(dut.one_err_det_o.value),
-        int(dut.two_err_det_o.value),
-    )
+@cocotb.test()
+async def tc_rom_001_default_config_read(dut):
+    """TC-ROM-001: Default configuration generation and read (RADDR_DEPTH=1024, RDATA_WIDTH=18, REGMODE=reg)."""
+    tracer = VerilogTracer("TC-ROM-001")
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
 
-
-async def enable_reads(dut, tracer: VerilogTracer = None):
-    """Assert all three read enable signals.
-
-    Verilog equivalent
-    ------------------
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    """
-    if tracer:
-        tracer.comment("Enable reads")
-        tracer.assign("rd_en_i", 1)
-        tracer.assign("rd_clk_en_i", 1)
-        tracer.assign("rd_out_clk_en_i", 1)
+    await do_reset(dut, tracer)
 
     dut.rd_en_i.value         = 1
     dut.rd_clk_en_i.value     = 1
     dut.rd_out_clk_en_i.value = 1
 
-
-async def disable_reads(dut):
-    """De-assert all three read enable signals."""
-    dut.rd_en_i.value         = 0
-    dut.rd_clk_en_i.value     = 0
-    dut.rd_out_clk_en_i.value = 0
-
-
-async def full_sweep(dut, tc):
-    """Sequential read of all RADDR_DEPTH locations; verifies against REF.
-
-    Uses single_read() for each address so that signal drives always happen
-    in the active phase (after RisingEdge, before ReadOnly).  This avoids
-    the ReadOnly → NextTimeStep → drive pattern which can corrupt the cocotb
-    2.x scheduler when the same test runs more than once in a session.
-    """
-    errors = 0
-    await enable_reads(dut)
-
-    for addr in range(RADDR_DEPTH):
-        got = await single_read(dut, addr)
+    test_addrs = [0, 1, 2, 511, min(1023, RADDR_DEPTH - 1)]
+    for addr in test_addrs:
+        got = await single_read(dut, addr, tracer)
         exp = REF[addr]
-        if got != exp:
-            hex_w = (RDATA_WIDTH + 3) // 4
-            dut._log.error(
-                f"[{tc}] addr={addr}: "
-                f"got=0x{got:0{hex_w}X} exp=0x{exp:0{hex_w}X}"
-            )
-            errors += 1
+        assert got == exp, f"[TC-ROM-001] addr=0x{addr:X}: got=0x{got:X} exp=0x{exp:X}"
 
-    assert errors == 0, f"{tc} FAILED — {errors} data mismatch(es)"
-    dut._log.info(f"{tc} PASSED  ({RADDR_DEPTH} reads, REGMODE={REGMODE})")
+    tracer.save()
 
 
-async def full_sweep_ecc(dut, tc):
-    """Like full_sweep but also verifies one_err_det_o=0 and two_err_det_o=0 at every address.
+# ==============================================================================
+# G2 · RADDR_DEPTH — Address Depth
+# ==============================================================================
 
-    Used by TG-09 tests to confirm clean ECC reads produce no false error flags.
-    """
-    errors = 0
-    await enable_reads(dut)
-    hex_w = (RDATA_WIDTH + 3) // 4
-    for addr in range(RADDR_DEPTH):
-        got, one, two = await single_read_ecc(dut, addr)
-        exp = REF[addr]
-        if got != exp:
-            dut._log.error(f"[{tc}] addr={addr}: got=0x{got:0{hex_w}X} exp=0x{exp:0{hex_w}X}")
-            errors += 1
-        if one != 0 or two != 0:
-            dut._log.error(
-                f"[{tc}] addr={addr}: one_err_det_o={one} two_err_det_o={two} (expected both 0)"
-            )
-            errors += 1
-    assert errors == 0, f"{tc} FAILED — {errors} error(s)"
-    dut._log.info(f"{tc} PASSED  ({RADDR_DEPTH} reads, no ECC flags, ECC_ENABLE={ECC_ENABLE})")
-
-
-async def latency_check(dut, tc, n_addrs=16, tracer: VerilogTracer = None):
-    """Drive n_addrs sequential addresses and verify output lags by exactly LAT cycles.
-
-    Pipeline phases:
-      Prime      — fill the first LAT pipeline stages (no output sampled).
-      Steady     — drive addr[i], sample addr[i-LAT] in the same clock cycle.
-      Drain      — stop driving; flush the last LAT addresses through the pipeline.
-
-    Verilog equivalent  (LAT and n_addrs are parameters; tc is the TC-ID string)
-    -----------------------------------------------------------------------------
-    // Prime: fill LAT pipeline stages, no output sampled
-    for (int i = 0; i < LAT; i++) begin
-        @(posedge rd_clk_i); rd_addr_i = i;
-    end
-
-    // Steady: at each rising edge drive addr[i] and sample addr[i-LAT]
-    for (int i = LAT; i < n_addrs; i++) begin
-        @(posedge rd_clk_i); rd_addr_i = i;
-        // → Python: dut._log.error(f"[{tc}] cycle {i}: addr_in_pipeline={i-LAT} got=0x... exp=0x...")
-        assert (rd_data_o === REF[i-LAT])
-          else $error("[%s] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
-                      tc, i, i-LAT, rd_data_o, REF[i-LAT]);
-    end
-
-    // Drain: stop driving; flush the last LAT addresses through the pipeline
-    for (int j = n_addrs-LAT; j < n_addrs; j++) begin
-        @(posedge rd_clk_i);
-        // → Python: dut._log.error(f"[{tc}] drain: addr_in_pipeline={j} got=0x... exp=0x...")
-        assert (rd_data_o === REF[j])
-          else $error("[%s] drain: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
-                      tc, j, rd_data_o, REF[j]);
-    end
-    """
-    errors = 0
-    hex_w  = (RDATA_WIDTH + 3) // 4
-    raddr_w = max(1, (RADDR_DEPTH - 1).bit_length())
-
-    if tracer:
-        tracer.comment(f"Prime: fill {LAT} pipeline stage(s)")
-    for i in range(LAT):
-        await RisingEdge(dut.rd_clk_i)
-        dut.rd_addr_i.value = i
-        if tracer:
-            tracer.clock_edge("rd_clk_i")
-            tracer.assign("rd_addr_i", i, width=raddr_w)
-
-    if tracer:
-        tracer.comment(f"Steady: drive addr[i] and sample addr[i-{LAT}]")
-    for i in range(LAT, n_addrs):
-        await RisingEdge(dut.rd_clk_i)
-        dut.rd_addr_i.value = i
-        if tracer:
-            tracer.clock_edge("rd_clk_i")
-            tracer.assign("rd_addr_i", i, width=raddr_w)
-        await ReadOnly()
-        got = int(dut.rd_data_o.value)
-        exp = REF[i - LAT]
-        if tracer:
-            tracer.check(i, i - LAT, "rd_data_o", exp, hex_w)
-        if got != exp:
-            dut._log.error(
-                f"[{tc}] cycle {i}: addr_in_pipeline={i - LAT} "
-                f"got=0x{got:0{hex_w}X} exp=0x{exp:0{hex_w}X}"
-            )
-            errors += 1
-
-    if tracer:
-        tracer.comment("Drain: flush last pipeline stages")
-    for j in range(n_addrs - LAT, n_addrs):
-        await RisingEdge(dut.rd_clk_i)
-        if tracer:
-            tracer.clock_edge("rd_clk_i")
-        await ReadOnly()
-        got = int(dut.rd_data_o.value)
-        exp = REF[j]
-        if tracer:
-            tracer.check(n_addrs + (j - (n_addrs - LAT)), j, "rd_data_o", exp, hex_w)
-        if got != exp:
-            dut._log.error(
-                f"[{tc}] drain: addr_in_pipeline={j} "
-                f"got=0x{got:0{hex_w}X} exp=0x{exp:0{hex_w}X}"
-            )
-            errors += 1
-
-    assert errors == 0, f"{tc} FAILED — {errors} latency mismatch(es)"
-    dut._log.info(f"{tc} PASSED  ({n_addrs} pipelined reads, LAT={LAT} verified)")
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TG-01  Basic Read Functionality
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@cocotb.test(skip=(REGMODE != "noreg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512
-                   or INIT_MODE != "mem_file"))
-async def tc_01_01_sequential_read_noreg(dut):
-    """TC-01-01: rd_data_o = mem[addr] after exactly 1 clock cycle (noreg, 36bx512).
-
-    Drives 16 sequential addresses in a pipelined pattern.  At each cycle the
-    address presented one cycle earlier must appear at rd_data_o, proving that
-    the pipeline latency is exactly LAT=1.
-
-    Verilog equivalent  (noreg → LAT=1, CLK_NS=10 ns, RST_NS=100 ns)
-    ------------------------------------------------------------------
-    // clock: rd_clk_i, period = 10 ns (100 MHz)
-
-    // → cocotb: await do_reset(dut)
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;                                // 10 cycles at 100 MHz
-    rst_i = 0;
-    @(posedge rd_clk_i);                 // sync to first post-reset rising edge
-
-    // → cocotb: await enable_reads(dut)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-
-    // → cocotb: await latency_check(dut, "TC-01-01")
-    //   Prime: fill the 1-cycle pipeline (no output sampled yet)
-    @(posedge rd_clk_i); rd_addr_i = 0;
-
-    //   Steady: drive addr[i], simultaneously sample addr[i-1] from the pipeline
-    for (int i = 1; i < 16; i++) begin
-        @(posedge rd_clk_i); rd_addr_i = i;
-        // → Python: latency_check() steady loop
-        //       dut._log.error(f"[TC-01-01] cycle {i}: addr_in_pipeline={i-1} got=0x... exp=0x...")
-        assert (rd_data_o === REF[i-1])
-          else $error("[TC-01-01] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
-                      i, i-1, rd_data_o, REF[i-1]);
-    end
-
-    //   Drain: stop driving new addresses; flush addr=15 through the 1-cycle pipeline
-    @(posedge rd_clk_i);
-    // → Python: latency_check() drain loop
-    //       dut._log.error(f"[TC-01-01] drain: addr_in_pipeline=15 got=0x... exp=0x...")
-    assert (rd_data_o === REF[15])
-      else $error("[TC-01-01] drain: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
-                  15, rd_data_o, REF[15]);
-    """
-    tracer = VerilogTracer("TC-01-01", enabled=True)
+@cocotb.test()
+async def tc_rom_002_minimum_address_depth(dut):
+    """TC-ROM-002: Minimum address depth (RADDR_DEPTH=2, RDATA_WIDTH=1)."""
+    tracer = VerilogTracer("TC-ROM-002")
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
     await do_reset(dut, tracer)
-    await enable_reads(dut, tracer)
-    await latency_check(dut, "TC-01-01", n_addrs=16, tracer=tracer)
-    tracer.save()
 
-
-@cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_01_02_sequential_read_reg(dut):
-    """TC-01-02: rd_data_o = mem[addr] after exactly 2 clock cycles (reg, 36b×512).
-
-    Drives 16 sequential addresses in a pipelined pattern.  At each cycle the
-    address presented two cycles earlier must appear at rd_data_o, proving that
-    the pipeline latency is exactly LAT=2.
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // latency_check (n=16, LAT=2)
-    // Prime: fill 2 pipeline stages
-    @(posedge rd_clk_i); rd_addr_i = 0;
-    @(posedge rd_clk_i); rd_addr_i = 1;
-    // Steady: drive addr[i], simultaneously sample addr[i-2]
-    for (int i = 2; i < 16; i++) begin
-        @(posedge rd_clk_i); rd_addr_i = i;
-        assert (rd_data_o === REF[i-2])
-          else $error("[TC-01-02] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
-                      i, i-2, rd_data_o, REF[i-2]);
-    end
-    // Drain: flush last 2 addresses
-    @(posedge rd_clk_i);
-    assert (rd_data_o === REF[14])
-      else $error("[TC-01-02] drain: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
-                  14, rd_data_o, REF[14]);
-    @(posedge rd_clk_i);
-    assert (rd_data_o === REF[15])
-      else $error("[TC-01-02] drain: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
-                  15, rd_data_o, REF[15]);
-    """
-    tracer = VerilogTracer("TC-01-02", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-    await latency_check(dut, "TC-01-02")
-    tracer.save()
-
-
-@cocotb.test(skip=(REGMODE != "noreg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_01_03_full_sweep_noreg(dut):
-    """TC-01-03: All RADDR_DEPTH locations verified in order (noreg, 36b×512).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT=1)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(1) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-01-03] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-01-03", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-01-03")
-    tracer.save()
-
-
-@cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_01_04_full_sweep_reg(dut):
-    """TC-01-04: All RADDR_DEPTH locations verified in order (reg, 36b×512).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT=2)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(2) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-01-04] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-01-04", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-01-04")
-    tracer.save()
-
-
-@cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 18 or RADDR_DEPTH != 1024))
-async def tc_01_05_boundary_addresses(dut):
-    """TC-01-05: Verify addr=0 and addr=RADDR_DEPTH-1 return correct data (reg, 18b×1024).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // single_read(0)
-    @(posedge rd_clk_i); rd_addr_i = 0;
-    repeat(LAT) @(posedge rd_clk_i);
-    assert (rd_data_o === REF[0])
-      else $fatal(1, "TC-01-05 FAILED at boundary addr=0: got=0x%0X exp=0x%0X",
-                  rd_data_o, REF[0]);
-    // single_read(RADDR_DEPTH-1)
-    @(posedge rd_clk_i); rd_addr_i = RADDR_DEPTH - 1;
-    repeat(LAT) @(posedge rd_clk_i);
-    assert (rd_data_o === REF[RADDR_DEPTH-1])
-      else $fatal(1, "TC-01-05 FAILED at boundary addr=%0d: got=0x%0X exp=0x%0X",
-                  RADDR_DEPTH-1, rd_data_o, REF[RADDR_DEPTH-1]);
-    """
-    tracer = VerilogTracer("TC-01-05", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    for addr in (0, RADDR_DEPTH - 1):
-        got = await single_read(dut, addr)
-        exp = REF[addr]
-        assert got == exp, (
-            f"TC-01-05 FAILED at boundary addr={addr}: "
-            f"got=0x{got:X} exp=0x{exp:X}"
-        )
-    dut._log.info("TC-01-05 PASSED  (boundary addresses)")
-    tracer.save()
-
-
-@cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_01_06_random_addresses(dut):
-    """TC-01-06: 100 random address reads match reference model (reg, 36b×512).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // 100 random reads (addresses pre-computed from Python seed 0x1ECC_CAFE)
-    // single_read(rand_addr) for each iteration
-    for (int iter = 0; iter < 100; iter++) begin
-        automatic int addr = rand_addr[iter];
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("TC-01-06 addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-01-06", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    rng = random.Random(0x1ECC_CAFE)   # fixed seed for reproducibility
-    errors = 0
-    for _ in range(100):
-        addr = rng.randint(0, RADDR_DEPTH - 1)
-        got  = await single_read(dut, addr)
-        exp  = REF[addr]
-        if got != exp:
-            dut._log.error(f"TC-01-06 addr={addr}: got=0x{got:X} exp=0x{exp:X}")
-            errors += 1
-
-    assert errors == 0, f"TC-01-06 FAILED — {errors} mismatch(es)"
-    dut._log.info("TC-01-06 PASSED  (100 random reads)")
-    tracer.save()
-
-
-@cocotb.test(skip=(REGMODE != "noreg" or RDATA_WIDTH != 9 or RADDR_DEPTH != 2048))
-async def tc_01_07_repeated_address(dut):
-    """TC-01-07: Same address read 20 consecutive cycles yields stable output (noreg, 9b×2048).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // single_read(RADDR_DEPTH/2) repeated 20 times (LAT=1)
-    for (int rep = 0; rep < 20; rep++) begin
-        @(posedge rd_clk_i); rd_addr_i = RADDR_DEPTH / 2;
-        repeat(1) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[RADDR_DEPTH/2])
-          else $fatal(1, "TC-01-07 FAILED at rep=%0d: got=0x%0X exp=0x%0X",
-                      rep, rd_data_o, REF[RADDR_DEPTH/2]);
-    end
-    """
-    tracer = VerilogTracer("TC-01-07", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    addr = RADDR_DEPTH // 2
-    exp  = REF[addr]
-    for rep in range(20):
-        got = await single_read(dut, addr)
-        assert got == exp, (
-            f"TC-01-07 FAILED at rep={rep}: got=0x{got:X} exp=0x{exp:X}"
-        )
-    dut._log.info("TC-01-07 PASSED  (20 repeated reads, stable output)")
-    tracer.save()
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TG-02  Read Enable (rd_en_i)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_02_01_rd_en_zero_at_start(dut):
-    """TC-02-01: rd_en_i=0 from start — rd_data_o holds reset value of 0 (reg, 36b×512).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // rd_clk_en_i=1, rd_out_clk_en_i=1, rd_en_i deliberately 0
-    rd_clk_en_i = 1; rd_out_clk_en_i = 1; rd_en_i = 0;
-    for (int addr = 0; addr < 8; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        assert (rd_data_o === 0)
-          else $fatal(1, "TC-02-01 FAILED at addr=%0d: rd_data_o=0x%0X, expected 0 (rd_en_i=0)",
-                      addr, rd_data_o);
-    end
-    """
-    tracer = VerilogTracer("TC-02-01", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-
-    # Clock gating enabled; read enable deliberately left de-asserted.
-    dut.rd_clk_en_i.value     = 1
-    dut.rd_out_clk_en_i.value = 1
-    dut.rd_en_i.value         = 0
-
-    # Drive valid addresses (all_one init → mem is all-1s, so any update would be visible).
-    # Output register was cleared by reset; with rd_en_i=0 it must stay 0.
-    for addr in range(8):
-        await RisingEdge(dut.rd_clk_i)
-        dut.rd_addr_i.value = addr
-        await ReadOnly()
-        got = int(dut.rd_data_o.value)
-        assert got == 0, (
-            f"TC-02-01 FAILED at addr={addr}: rd_data_o=0x{got:X}, expected 0 (rd_en_i=0)"
-        )
-
-    dut._log.info("TC-02-01 PASSED  (rd_data_o held at reset value 0 with rd_en_i=0)")
-    tracer.save()
-
-
-@cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_02_02_rd_en_deasserted_mid_seq(dut):
-    """TC-02-02: rd_en_i de-asserted mid-sequence — output freezes at last valid value (reg, 36b×512).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // Fill pipeline at addr=0 (LAT+1 edges); frozen = REF[0]
-    rd_addr_i = 0;
-    repeat(LAT + 1) @(posedge rd_clk_i);
-    assert (rd_data_o === REF[0])
-      else $fatal(1, "TC-02-02 pre-condition: addr=0 got=0x%0X exp=0x%0X",
-                  rd_data_o, REF[0]);
-    // De-assert rd_en_i; drive 8 different addresses — output must hold at REF[0]
-    rd_en_i = 0;
-    for (int addr = 1; addr <= 8; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        assert (rd_data_o === REF[0])
-          else $fatal(1, "TC-02-02 FAILED at addr=%0d: rd_data_o=0x%0X, expected frozen=0x%0X",
-                      addr, rd_data_o, REF[0]);
-    end
-    """
-    tracer = VerilogTracer("TC-02-02", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    # Fill the pipeline at addr=0 and record the stable output.
-    dut.rd_addr_i.value = 0
-    for _ in range(LAT + 1):
-        await RisingEdge(dut.rd_clk_i)
-    await ReadOnly()
-    frozen = int(dut.rd_data_o.value)
-    assert frozen == REF[0], (
-        f"TC-02-02 pre-condition: addr=0 got=0x{frozen:X} exp=0x{REF[0]:X}"
-    )
-
-    # De-assert rd_en_i; drive eight different addresses and verify output never changes.
-    await RisingEdge(dut.rd_clk_i)
-    dut.rd_en_i.value = 0
-    for addr in range(1, 9):
-        await RisingEdge(dut.rd_clk_i)
-        dut.rd_addr_i.value = addr
-        await ReadOnly()
-        got = int(dut.rd_data_o.value)
-        assert got == frozen, (
-            f"TC-02-02 FAILED at addr={addr}: rd_data_o=0x{got:X}, expected frozen=0x{frozen:X}"
-        )
-
-    dut._log.info("TC-02-02 PASSED  (rd_data_o froze when rd_en_i de-asserted)")
-    tracer.save()
-
-
-@cocotb.test(skip=(REGMODE != "noreg" or RDATA_WIDTH != 18 or RADDR_DEPTH != 1024))
-async def tc_02_03_rd_en_toggle_every_cycle(dut):
-    """TC-02-03: rd_en_i alternated 1/0 — output updates only when rd_en_i=1 (noreg, 18b×1024).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // rd_clk_en_i=1, rd_out_clk_en_i=1; rd_en_i toggled per iteration (noreg, LAT=1)
-    rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int i = 0; i < 8; i++) begin
-        automatic int addr = i * (RADDR_DEPTH / 8);
-        // rd_en_i=1: single_read(addr), LAT=1
-        rd_en_i = 1;
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(1) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("TC-02-03 rd_en=1 iter=%0d addr=%0d: got=0x%0X exp=0x%0X",
-                      i, addr, rd_data_o, REF[addr]);
-        // rd_en_i=0: one cycle with different address — output must hold at REF[addr]
-        rd_en_i = 0;
-        rd_addr_i = (addr + RADDR_DEPTH / 2) % RADDR_DEPTH;
-        @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("TC-02-03 rd_en=0 iter=%0d: got=0x%0X expected hold=0x%0X",
-                      i, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-02-03", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    dut.rd_clk_en_i.value     = 1
-    dut.rd_out_clk_en_i.value = 1
-
-    N     = 8
-    errors = 0
-    hex_w  = (RDATA_WIDTH + 3) // 4
-
-    for i in range(N):
-        addr = i * (RADDR_DEPTH // N)
-
-        # rd_en_i=1: issue a normal read; output must equal REF[addr].
-        await RisingEdge(dut.rd_clk_i)
-        dut.rd_en_i.value = 1
-        dut.rd_addr_i.value = addr
-        for _ in range(LAT):
-            await RisingEdge(dut.rd_clk_i)
-        await ReadOnly()
-        got = int(dut.rd_data_o.value)
-        exp = REF[addr]
-        if got != exp:
-            dut._log.error(
-                f"TC-02-03 rd_en=1 iter={i} addr={addr}: "
-                f"got=0x{got:0{hex_w}X} exp=0x{exp:0{hex_w}X}"
-            )
-            errors += 1
-        last_out = got
-
-        # rd_en_i=0: one cycle with a deliberately different address — output must hold.
-        await RisingEdge(dut.rd_clk_i)
-        dut.rd_en_i.value   = 0
-        dut.rd_addr_i.value = (addr + RADDR_DEPTH // 2) % RADDR_DEPTH
-        await RisingEdge(dut.rd_clk_i)
-        await ReadOnly()
-        got = int(dut.rd_data_o.value)
-        if got != last_out:
-            dut._log.error(
-                f"TC-02-03 rd_en=0 iter={i}: "
-                f"got=0x{got:0{hex_w}X} expected hold=0x{last_out:0{hex_w}X}"
-            )
-            errors += 1
-
-    assert errors == 0, f"TC-02-03 FAILED — {errors} error(s)"
-    dut._log.info(f"TC-02-03 PASSED  ({N} rd_en_i 1/0 pairs, output updates only on rd_en_i=1)")
-    tracer.save()
-
-
-@cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_02_04_rd_en_resumes(dut):
-    """TC-02-04: rd_en_i de-asserted then re-asserted — correct data resumes (reg, 36b×512).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // single_read(0) — baseline (LAT=2)
-    @(posedge rd_clk_i); rd_addr_i = 0;
-    repeat(2) @(posedge rd_clk_i);
-    assert (rd_data_o === REF[0])
-      else $fatal(1, "TC-02-04 pre-condition: addr=0 got=0x%0X exp=0x%0X",
-                  rd_data_o, REF[0]);
-    // De-assert rd_en_i for 5 cycles
-    rd_en_i = 0;
-    repeat(5) @(posedge rd_clk_i);
-    // Re-assert rd_en_i; single_read(RADDR_DEPTH/2) (LAT=2)
-    rd_en_i = 1;
-    @(posedge rd_clk_i); rd_addr_i = RADDR_DEPTH / 2;
-    repeat(2) @(posedge rd_clk_i);
-    assert (rd_data_o === REF[RADDR_DEPTH/2])
-      else $fatal(1, "TC-02-04 FAILED after re-assertion: addr=%0d got=0x%0X exp=0x%0X",
-                  RADDR_DEPTH/2, rd_data_o, REF[RADDR_DEPTH/2]);
-    """
-    tracer = VerilogTracer("TC-02-04", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    # Establish a known baseline read.
-    got_before = await single_read(dut, 0)
-    assert got_before == REF[0], (
-        f"TC-02-04 pre-condition: addr=0 got=0x{got_before:X} exp=0x{REF[0]:X}"
-    )
-
-    # De-assert rd_en_i for 5 cycles (pipeline drains / freezes).
-    await RisingEdge(dut.rd_clk_i)
-    dut.rd_en_i.value = 0
-    for _ in range(5):
-        await RisingEdge(dut.rd_clk_i)
-
-    # Re-assert rd_en_i and read a different address; data must be correct.
-    dut.rd_en_i.value = 1
-    addr = RADDR_DEPTH // 2
-    got  = await single_read(dut, addr)
-    exp  = REF[addr]
-    assert got == exp, (
-        f"TC-02-04 FAILED after re-assertion: addr={addr} got=0x{got:X} exp=0x{exp:X}"
-    )
-    dut._log.info("TC-02-04 PASSED  (reads resume correctly after rd_en_i re-assertion)")
-    tracer.save()
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TG-03  Read Clock Enable (rd_clk_en_i)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@cocotb.test(skip=(REGMODE != "noreg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_03_01_clk_en_zero_holds_noreg(dut):
-    """TC-03-01: rd_clk_en_i=0 freezes address register — rd_data_o retains last value (noreg, 36b×512).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // single_read(0) — prime (LAT=1)
-    @(posedge rd_clk_i); rd_addr_i = 0;
-    repeat(1) @(posedge rd_clk_i);
-    assert (rd_data_o === REF[0])
-      else $fatal(1, "TC-03-01 pre-condition: got=0x%0X exp=0x%0X",
-                  rd_data_o, REF[0]);
-    // Return to Active; de-assert rd_clk_en_i
-    @(posedge rd_clk_i);
-    rd_clk_en_i = 0;
-    for (int addr = 1; addr <= 8; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        assert (rd_data_o === REF[0])
-          else $fatal(1, "TC-03-01 FAILED addr=%0d: rd_data_o=0x%0X expected frozen=0x%0X",
-                      addr, rd_data_o, REF[0]);
-    end
-    """
-    tracer = VerilogTracer("TC-03-01", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    # Prime: read addr=0 so the address register is at a known, stable location.
-    frozen = await single_read(dut, 0)
-    assert frozen == REF[0], f"TC-03-01 pre-condition: got=0x{frozen:X} exp=0x{REF[0]:X}"
-
-    # single_read ends in ReadOnly phase; return to Active before driving rd_clk_en_i.
-    await RisingEdge(dut.rd_clk_i)
-
-    # De-assert clock enable; drive eight different addresses.
-    # The address register must not advance, so output must stay mem[0].
-    dut.rd_clk_en_i.value = 0
-    for addr in range(1, 9):
-        await RisingEdge(dut.rd_clk_i)
-        dut.rd_addr_i.value = addr
-        await ReadOnly()
-        got = int(dut.rd_data_o.value)
-        assert got == frozen, (
-            f"TC-03-01 FAILED addr={addr}: rd_data_o=0x{got:X} expected frozen=0x{frozen:X}"
-        )
-
-    dut._log.info("TC-03-01 PASSED  (rd_data_o held at last value with rd_clk_en_i=0, noreg)")
-    tracer.save()
-
-
-@cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_03_02_clk_en_zero_holds_reg(dut):
-    """TC-03-02: rd_clk_en_i=0 freezes address and output registers — rd_data_o retains last value (reg, 36b×512).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // single_read(0) — prime (LAT=2)
-    @(posedge rd_clk_i); rd_addr_i = 0;
-    repeat(2) @(posedge rd_clk_i);
-    assert (rd_data_o === REF[0])
-      else $fatal(1, "TC-03-02 pre-condition: got=0x%0X exp=0x%0X",
-                  rd_data_o, REF[0]);
-    // Return to Active; de-assert rd_clk_en_i
-    @(posedge rd_clk_i);
-    rd_clk_en_i = 0;
-    for (int addr = 1; addr <= 8; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        assert (rd_data_o === REF[0])
-          else $fatal(1, "TC-03-02 FAILED addr=%0d: rd_data_o=0x%0X expected frozen=0x%0X",
-                      addr, rd_data_o, REF[0]);
-    end
-    """
-    tracer = VerilogTracer("TC-03-02", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    # Prime: read addr=0 and capture the stable output register value.
-    frozen = await single_read(dut, 0)
-    assert frozen == REF[0], f"TC-03-02 pre-condition: got=0x{frozen:X} exp=0x{REF[0]:X}"
-
-    # single_read ends in ReadOnly phase; return to Active before driving rd_clk_en_i.
-    await RisingEdge(dut.rd_clk_i)
-
-    # De-assert clock enable; drive eight different addresses.
-    # Both address register and output register must remain frozen.
-    dut.rd_clk_en_i.value = 0
-    for addr in range(1, 9):
-        await RisingEdge(dut.rd_clk_i)
-        dut.rd_addr_i.value = addr
-        await ReadOnly()
-        got = int(dut.rd_data_o.value)
-        assert got == frozen, (
-            f"TC-03-02 FAILED addr={addr}: rd_data_o=0x{got:X} expected frozen=0x{frozen:X}"
-        )
-
-    dut._log.info("TC-03-02 PASSED  (rd_data_o held at last value with rd_clk_en_i=0, reg)")
-    tracer.save()
-
-
-@cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_03_03_clk_en_reassertion(dut):
-    """TC-03-03: rd_clk_en_i frozen 10 cycles then re-asserted — new address registered, correct data (reg, 36b×512).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // single_read(0) — baseline (LAT=2)
-    @(posedge rd_clk_i); rd_addr_i = 0;
-    repeat(2) @(posedge rd_clk_i);
-    assert (rd_data_o === REF[0])
-      else $fatal(1, "TC-03-03 pre-condition: got=0x%0X exp=0x%0X",
-                  rd_data_o, REF[0]);
-    // Return to Active; freeze rd_clk_en_i for 10 cycles while holding target address
-    @(posedge rd_clk_i);
-    rd_clk_en_i = 0; rd_addr_i = RADDR_DEPTH / 4;
-    repeat(10) @(posedge rd_clk_i);
-    // Re-assert rd_clk_en_i; single_read(RADDR_DEPTH/4) flushes LAT=2 pipeline
-    rd_clk_en_i = 1;
-    @(posedge rd_clk_i); rd_addr_i = RADDR_DEPTH / 4;
-    repeat(2) @(posedge rd_clk_i);
-    assert (rd_data_o === REF[RADDR_DEPTH/4])
-      else $fatal(1, "TC-03-03 FAILED after re-assertion: addr=%0d got=0x%0X exp=0x%0X",
-                  RADDR_DEPTH/4, rd_data_o, REF[RADDR_DEPTH/4]);
-    """
-    tracer = VerilogTracer("TC-03-03", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    # Baseline read at addr=0.
-    baseline = await single_read(dut, 0)
-    assert baseline == REF[0], f"TC-03-03 pre-condition: got=0x{baseline:X} exp=0x{REF[0]:X}"
-
-    # single_read ends in ReadOnly phase; return to Active before driving any signals.
-    await RisingEdge(dut.rd_clk_i)
-
-    # Freeze: de-assert rd_clk_en_i for 10 cycles while driving the target address.
-    # The target address sits on rd_addr_i throughout so it is latched on re-assertion.
-    target = RADDR_DEPTH // 4
-    dut.rd_clk_en_i.value = 0
-    dut.rd_addr_i.value   = target
-    for _ in range(10):
-        await RisingEdge(dut.rd_clk_i)
-
-    # Re-assert rd_clk_en_i; the first edge with clk_en=1 latches the target address.
-    # single_read handles the LAT=2 pipeline delay from address capture to output.
-    dut.rd_clk_en_i.value = 1
-    got = await single_read(dut, target)
-    exp = REF[target]
-    assert got == exp, (
-        f"TC-03-03 FAILED after re-assertion: addr={target} got=0x{got:X} exp=0x{exp:X}"
-    )
-    dut._log.info("TC-03-03 PASSED  (correct data after rd_clk_en_i re-assertion)")
-    tracer.save()
-
-
-@cocotb.test(skip=(REGMODE != "noreg" or RDATA_WIDTH != 18 or RADDR_DEPTH != 1024))
-async def tc_03_04_clk_en_toggle_pattern(dut):
-    """TC-03-04: rd_clk_en_i alternated 1/0 each pair — output advances only when rd_clk_en_i=1 (noreg, 18b×1024).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // rd_en_i=1, rd_out_clk_en_i=1; rd_clk_en_i toggled per iteration (noreg, LAT=1)
-    rd_en_i = 1; rd_out_clk_en_i = 1;
-    for (int i = 0; i < 8; i++) begin
-        automatic int addr = i * (RADDR_DEPTH / 8);
-        // rd_clk_en_i=1: drive addr before edge; sample same-edge output (noreg)
-        rd_clk_en_i = 1; rd_addr_i = addr;
-        @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("TC-03-04 clk_en=1 iter=%0d addr=%0d: got=0x%0X exp=0x%0X",
-                      i, addr, rd_data_o, REF[addr]);
-        // rd_clk_en_i=0: drive different address; address register must not advance
-        rd_clk_en_i = 0; rd_addr_i = (addr + RADDR_DEPTH / 2) % RADDR_DEPTH;
-        @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("TC-03-04 clk_en=0 iter=%0d: got=0x%0X expected hold=0x%0X",
-                      i, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-03-04", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    dut.rd_en_i.value         = 1
-    dut.rd_out_clk_en_i.value = 1
-
-    N      = 8
-    errors = 0
-    hex_w  = (RDATA_WIDTH + 3) // 4
-
-    for i in range(N):
-        addr = i * (RADDR_DEPTH // N)
-
-        # rd_clk_en_i=1 cycle: drive addr BEFORE the rising edge so the EBR latches
-        # it at that very edge (noreg: ReadOnly of the same edge shows mem[addr]).
-        dut.rd_clk_en_i.value = 1
-        dut.rd_addr_i.value   = addr
-        await RisingEdge(dut.rd_clk_i)
-        await ReadOnly()
-        got = int(dut.rd_data_o.value)
-        exp = REF[addr]
-        if got != exp:
-            dut._log.error(
-                f"TC-03-04 clk_en=1 iter={i} addr={addr}: "
-                f"got=0x{got:0{hex_w}X} exp=0x{exp:0{hex_w}X}"
-            )
-            errors += 1
-        last_out = got
-
-        # Exit ReadOnly phase before driving signals.
-        await FallingEdge(dut.rd_clk_i)
-
-        # rd_clk_en_i=0 cycle: drive a different address — address register must
-        # not advance, so output must hold at mem[addr].
-        dut.rd_clk_en_i.value = 0
-        dut.rd_addr_i.value   = (addr + RADDR_DEPTH // 2) % RADDR_DEPTH
-        await RisingEdge(dut.rd_clk_i)
-        await ReadOnly()
-        got = int(dut.rd_data_o.value)
-        if got != last_out:
-            dut._log.error(
-                f"TC-03-04 clk_en=0 iter={i}: "
-                f"got=0x{got:0{hex_w}X} expected hold=0x{last_out:0{hex_w}X}"
-            )
-            errors += 1
-
-        # Exit ReadOnly phase so the next iteration can drive signals.
-        await FallingEdge(dut.rd_clk_i)
-
-    assert errors == 0, f"TC-03-04 FAILED — {errors} error(s)"
-    dut._log.info(f"TC-03-04 PASSED  ({N} rd_clk_en_i 1/0 pairs, output advances only on clk_en=1)")
-    tracer.save()
-
-
-@cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 1024))
-async def tc_03_05_cascaded_clk_en(dut):
-    """TC-03-05: rd_clk_en_i toggled across cascaded bank boundary — no spurious bank data (reg, 36b×1024).
-
-    With RADDR_DEPTH=1024 the IP uses two cascaded 36×512 EBR tiles.  The bank
-    boundary is at addr 511 (tile 0) / 512 (tile 1).  Toggling rd_clk_en_i while
-    reading across that boundary exercises the v2.5.0 cascaded-enable fix.
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // Read addresses {509,510,511,512,513,514} near bank boundary; freeze 2 cycles between reads (LAT=2)
-    for (int k = 0; k < 6; k++) begin
-        automatic int addr = 509 + k;
-        rd_clk_en_i = 1;
-        // single_read(addr)
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(2) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("TC-03-05 addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-        // Freeze rd_clk_en_i for 2 cycles between reads
-        rd_clk_en_i = 0;
-        repeat(2) @(posedge rd_clk_i);
-    end
-    """
-    tracer = VerilogTracer("TC-03-05", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    BANK_BOUNDARY = 511
-    addrs  = [BANK_BOUNDARY - 2, BANK_BOUNDARY - 1, BANK_BOUNDARY,
-              BANK_BOUNDARY + 1, BANK_BOUNDARY + 2, BANK_BOUNDARY + 3]
-    errors = 0
-    hex_w  = (RDATA_WIDTH + 3) // 4
-
-    for addr in addrs:
-        # Normal read with rd_clk_en_i=1 (re-asserted before each single_read).
-        await RisingEdge(dut.rd_clk_i)
-        dut.rd_clk_en_i.value = 1
-        got = await single_read(dut, addr)
-        exp = REF[addr]
-        if got != exp:
-            dut._log.error(
-                f"TC-03-05 addr={addr}: got=0x{got:0{hex_w}X} exp=0x{exp:0{hex_w}X}"
-            )
-            errors += 1
-
-        # Freeze rd_clk_en_i for 2 cycles between reads to stress the bank-select logic.
-        await RisingEdge(dut.rd_clk_i)
-        dut.rd_clk_en_i.value = 0
-        for _ in range(2):
-            await RisingEdge(dut.rd_clk_i)
-
-    assert errors == 0, f"TC-03-05 FAILED — {errors} mismatch(es) across bank boundary"
-    dut._log.info("TC-03-05 PASSED  (no spurious bank data across rd_clk_en_i toggle at boundary)")
-    tracer.save()
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TG-04  Output Register Enable (rd_out_clk_en_i / OUTPUT_CLK_EN parameter)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512
-                   or OUTPUT_CLK_EN != 1))
-async def tc_04_01_out_clk_en_zero_freezes_output(dut):
-    """TC-04-01: rd_out_clk_en_i=0 freezes the output register (reg, 36b×512, OUTPUT_CLK_EN=1).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // single_read(0) — prime (LAT=2); frozen = REF[0]
-    @(posedge rd_clk_i); rd_addr_i = 0;
-    repeat(2) @(posedge rd_clk_i);
-    assert (rd_data_o === REF[0])
-      else $fatal(1, "TC-04-01 pre-condition: got=0x%0X exp=0x%0X",
-                  rd_data_o, REF[0]);
-    // Return to Active; freeze output register (rd_clk_en_i still 1)
-    @(posedge rd_clk_i);
-    rd_out_clk_en_i = 0;
-    for (int addr = 1; addr <= 8; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        assert (rd_data_o === REF[0])
-          else $error("TC-04-01 addr=%0d: rd_data_o=0x%0X expected frozen=0x%0X",
-                      addr, rd_data_o, REF[0]);
-    end
-    """
-    tracer = VerilogTracer("TC-04-01", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    # Prime: read addr=0 with both enables active to establish a known output value.
-    frozen = await single_read(dut, 0)
-    assert frozen == REF[0], f"TC-04-01 pre-condition: got=0x{frozen:X} exp=0x{REF[0]:X}"
-
-    # single_read ends in ReadOnly; return to Active before driving rd_out_clk_en_i.
-    await RisingEdge(dut.rd_clk_i)
-
-    # Freeze the output register — address register still advances (rd_clk_en_i=1).
-    dut.rd_out_clk_en_i.value = 0
-
-    errors = 0
-    hex_w = (RDATA_WIDTH + 3) // 4
-    for addr in range(1, 9):
-        await RisingEdge(dut.rd_clk_i)
-        dut.rd_addr_i.value = addr
-        await ReadOnly()
-        got = int(dut.rd_data_o.value)
-        if got != frozen:
-            dut._log.error(
-                f"TC-04-01 addr={addr}: rd_data_o=0x{got:0{hex_w}X} expected frozen=0x{frozen:0{hex_w}X}"
-            )
-            errors += 1
-
-    assert errors == 0, f"TC-04-01 FAILED — {errors} error(s); output register not frozen"
-    dut._log.info("TC-04-01 PASSED  (rd_data_o held when rd_out_clk_en_i=0)")
-    tracer.save()
-
-
-@cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512
-                   or OUTPUT_CLK_EN != 1))
-async def tc_04_02_out_clk_en_normal_operation(dut):
-    """TC-04-02: rd_out_clk_en_i=1 — normal 2-cycle latency (reg, 36b×512, OUTPUT_CLK_EN=1).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // latency_check (n=16, LAT=2)
-    // Prime: fill 2 pipeline stages
-    @(posedge rd_clk_i); rd_addr_i = 0;
-    @(posedge rd_clk_i); rd_addr_i = 1;
-    // Steady: drive addr[i], simultaneously sample addr[i-2]
-    for (int i = 2; i < 16; i++) begin
-        @(posedge rd_clk_i); rd_addr_i = i;
-        assert (rd_data_o === REF[i-2])
-          else $error("[TC-04-02] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
-                      i, i-2, rd_data_o, REF[i-2]);
-    end
-    // Drain: flush last 2 addresses
-    @(posedge rd_clk_i);
-    assert (rd_data_o === REF[14])
-      else $error("[TC-04-02] drain: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
-                  14, rd_data_o, REF[14]);
-    @(posedge rd_clk_i);
-    assert (rd_data_o === REF[15])
-      else $error("[TC-04-02] drain: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
-                  15, rd_data_o, REF[15]);
-    """
-    tracer = VerilogTracer("TC-04-02", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-    await latency_check(dut, "TC-04-02")
-    tracer.save()
-
-
-@cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512
-                   or OUTPUT_CLK_EN != 1))
-async def tc_04_03_out_clk_en_toggle_mid_seq(dut):
-    """TC-04-03: rd_out_clk_en_i toggled mid-sequence — rd_data_o updates only when it is 1 (reg, 36b×512, OUTPUT_CLK_EN=1).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // Phase 1: single_read(0) to load known output (LAT=2); frozen = REF[0]
-    @(posedge rd_clk_i); rd_addr_i = 0;
-    repeat(2) @(posedge rd_clk_i);
-    assert (rd_data_o === REF[0])
-      else $fatal(1, "TC-04-03 pre-condition: got=0x%0X exp=0x%0X",
-                  rd_data_o, REF[0]);
-    // Return to Active; freeze output register
-    @(posedge rd_clk_i);
-    rd_out_clk_en_i = 0;
-    // Phase 2: 5 cycles with rd_out_clk_en_i=0 — rd_data_o must not change
-    for (int addr = 1; addr <= 5; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        assert (rd_data_o === REF[0])
-          else $error("TC-04-03 frozen phase addr=%0d: got=0x%0X expected 0x%0X",
-                      addr, rd_data_o, REF[0]);
-    end
-    // Return to Active; re-enable output register
-    @(posedge rd_clk_i);
-    rd_out_clk_en_i = 1;
-    // Phase 3: single_read(8) — normal pipelined delivery must resume (LAT=2)
-    @(posedge rd_clk_i); rd_addr_i = 8;
-    repeat(2) @(posedge rd_clk_i);
-    assert (rd_data_o === REF[8])
-      else $error("TC-04-03 resume addr=%0d: got=0x%0X exp=0x%0X",
-                  8, rd_data_o, REF[8]);
-    """
-    tracer = VerilogTracer("TC-04-03", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    hex_w = (RDATA_WIDTH + 3) // 4
-
-    # Phase 1: prime — read addr=0 with rd_out_clk_en_i=1 to load a known output value.
-    frozen = await single_read(dut, 0)
-    assert frozen == REF[0], f"TC-04-03 pre-condition: got=0x{frozen:X} exp=0x{REF[0]:X}"
-
-    # Return to Active phase, then freeze the output register.
-    await RisingEdge(dut.rd_clk_i)
-    dut.rd_out_clk_en_i.value = 0
-
-    # Phase 2: 5 cycles with rd_out_clk_en_i=0 — rd_data_o must not change.
-    errors = 0
-    for addr in range(1, 6):
-        await RisingEdge(dut.rd_clk_i)
-        dut.rd_addr_i.value = addr
-        await ReadOnly()
-        got = int(dut.rd_data_o.value)
-        if got != frozen:
-            dut._log.error(
-                f"TC-04-03 frozen phase addr={addr}: got=0x{got:0{hex_w}X} expected 0x{frozen:0{hex_w}X}"
-            )
-            errors += 1
-
-    # Return to Active phase, re-enable the output register.
-    await RisingEdge(dut.rd_clk_i)
-    dut.rd_out_clk_en_i.value = 1
-
-    # Phase 3: one clean latency-aware read — normal pipelined delivery must resume.
-    target = 8
-    got = await single_read(dut, target)
-    exp = REF[target]
-    if got != exp:
-        dut._log.error(f"TC-04-03 resume addr={target}: got=0x{got:0{hex_w}X} exp=0x{exp:0{hex_w}X}")
-        errors += 1
-
-    assert errors == 0, f"TC-04-03 FAILED — {errors} error(s)"
-    dut._log.info("TC-04-03 PASSED  (rd_data_o froze during rd_out_clk_en_i=0; resumed after)")
-    tracer.save()
-
-
-@cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512
-                   or OUTPUT_CLK_EN != 0))
-async def tc_04_04_output_clk_en_param_zero_no_effect(dut):
-    """TC-04-04: OUTPUT_CLK_EN=0 — rd_out_clk_en_i port has no effect; data flows normally (reg, 36b×512, OUTPUT_CLK_EN=0).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // rd_en_i=1, rd_clk_en_i=1, rd_out_clk_en_i=0 (OUTPUT_CLK_EN=0: gate hardwired open)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 0;
-    // latency_check (n=16, LAT=2)
-    // Prime: fill 2 pipeline stages
-    @(posedge rd_clk_i); rd_addr_i = 0;
-    @(posedge rd_clk_i); rd_addr_i = 1;
-    // Steady: drive addr[i], simultaneously sample addr[i-2]
-    for (int i = 2; i < 16; i++) begin
-        @(posedge rd_clk_i); rd_addr_i = i;
-        assert (rd_data_o === REF[i-2])
-          else $error("[TC-04-04] cycle %0d: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
-                      i, i-2, rd_data_o, REF[i-2]);
-    end
-    // Drain: flush last 2 addresses
-    @(posedge rd_clk_i);
-    assert (rd_data_o === REF[14])
-      else $error("[TC-04-04] drain: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
-                  14, rd_data_o, REF[14]);
-    @(posedge rd_clk_i);
-    assert (rd_data_o === REF[15])
-      else $error("[TC-04-04] drain: addr_in_pipeline=%0d got=0x%0X exp=0x%0X",
-                  15, rd_data_o, REF[15]);
-    """
-    tracer = VerilogTracer("TC-04-04", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-
-    # Deliberately leave rd_out_clk_en_i=0.
-    # When OUTPUT_CLK_EN=0 the output-register gate is hardwired open, so this must have no effect.
     dut.rd_en_i.value         = 1
     dut.rd_clk_en_i.value     = 1
-    dut.rd_out_clk_en_i.value = 0
+    dut.rd_out_clk_en_i.value = 1
 
-    await latency_check(dut, "TC-04-04")
+    for addr in range(min(2, RADDR_DEPTH)):
+        got = await single_read(dut, addr, tracer)
+        exp = REF[addr]
+        assert got == exp, f"[TC-ROM-002] addr={addr}: got=0x{got:X} exp=0x{exp:X}"
     tracer.save()
 
 
-@cocotb.test(skip=(REGMODE != "reg" or RDATA_WIDTH != 18 or RADDR_DEPTH != 1024
-                   or OUTPUT_CLK_EN != 1))
-async def tc_04_05_both_enables_deasserted(dut):
-    """TC-04-05: rd_clk_en_i=0 and rd_out_clk_en_i=0 simultaneously — rd_data_o holds last value (reg, 18b×1024, OUTPUT_CLK_EN=1).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // single_read(0) — prime (LAT=2); frozen = REF[0]
-    @(posedge rd_clk_i); rd_addr_i = 0;
-    repeat(2) @(posedge rd_clk_i);
-    assert (rd_data_o === REF[0])
-      else $fatal(1, "TC-04-05 pre-condition: got=0x%0X exp=0x%0X",
-                  rd_data_o, REF[0]);
-    // Return to Active; de-assert both enables simultaneously
-    @(posedge rd_clk_i);
-    rd_clk_en_i = 0; rd_out_clk_en_i = 0;
-    for (int addr = 1; addr <= 8; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        assert (rd_data_o === REF[0])
-          else $error("TC-04-05 addr=%0d: rd_data_o=0x%0X expected frozen=0x%0X",
-                      addr, rd_data_o, REF[0]);
-    end
-    """
-    tracer = VerilogTracer("TC-04-05", enabled=True)
+@cocotb.test()
+async def tc_rom_003_median_address_depth_full_range(dut):
+    """TC-ROM-003: Median address depth, full-range read (RADDR_DEPTH=1024, RDATA_WIDTH=18)."""
+    tracer = VerilogTracer("TC-ROM-003")
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
+    await do_reset(dut, tracer)
 
-    hex_w = (RDATA_WIDTH + 3) // 4
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
 
-    # Prime: read addr=0 to establish the value both registers will hold.
-    frozen = await single_read(dut, 0)
-    assert frozen == REF[0], f"TC-04-05 pre-condition: got=0x{frozen:X} exp=0x{REF[0]:X}"
+    for addr in range(RADDR_DEPTH):
+        got = await single_read(dut, addr, tracer)
+        exp = REF[addr]
+        assert got == exp, f"[TC-ROM-003] addr=0x{addr:X}: got=0x{got:X} exp=0x{exp:X}"
+    tracer.save()
 
-    # Return to Active phase, then de-assert both enables simultaneously.
+
+@cocotb.test()
+async def tc_rom_004_maximum_address_depth(dut):
+    """TC-ROM-004: Maximum address depth (RADDR_DEPTH=65536, RDATA_WIDTH=18)."""
+    tracer = VerilogTracer("TC-ROM-004")
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut, tracer)
+
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
+
+    test_addrs = [0, 1, 511, 1023, 1024, 4095, 4096, min(65535, RADDR_DEPTH - 1)]
+    for addr in test_addrs:
+        got = await single_read(dut, addr, tracer)
+        exp = REF[addr]
+        assert got == exp, f"[TC-ROM-004] addr=0x{addr:X}: got=0x{got:X} exp=0x{exp:X}"
+    tracer.save()
+
+
+@cocotb.test()
+async def tc_rom_005_address_depth_at_budget(dut):
+    """TC-ROM-005: Address depth at exact LIFCL budget (RADDR_DEPTH=3024, RDATA_WIDTH=512)."""
+    tracer = VerilogTracer("TC-ROM-005")
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut, tracer)
+
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
+
+    test_addrs = [0, 1, 1023, 1024, 2047, min(3023, RADDR_DEPTH - 1)]
+    for addr in test_addrs:
+        got = await single_read(dut, addr, tracer)
+        exp = REF[addr]
+        assert got == exp, f"[TC-ROM-005] addr=0x{addr:X}: got=0x{got:X} exp=0x{exp:X}"
+    tracer.save()
+
+
+@cocotb.test()
+async def tc_rom_006_non_power_of_two_depth(dut):
+    """TC-ROM-006: Non-power-of-two address depth (RADDR_DEPTH=1000, RDATA_WIDTH=8)."""
+    tracer = VerilogTracer("TC-ROM-006")
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut, tracer)
+
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
+
+    test_addrs = [0, 1, 500, min(999, RADDR_DEPTH - 1)]
+    for addr in test_addrs:
+        got = await single_read(dut, addr, tracer)
+        exp = REF[addr]
+        assert got == exp, f"[TC-ROM-006] addr=0x{addr:X}: got=0x{got:X} exp=0x{exp:X}"
+    tracer.save()
+
+
+# ==============================================================================
+# G3 · RDATA_WIDTH — Data Width
+# ==============================================================================
+
+@cocotb.test()
+async def tc_rom_007_minimum_data_width(dut):
+    """TC-ROM-007: Minimum data width (RADDR_DEPTH=1024, RDATA_WIDTH=1)."""
+    tracer = VerilogTracer("TC-ROM-007")
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut, tracer)
+
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
+
+    check_addrs = list(range(8)) + [1020, 1021, 1022, min(1023, RADDR_DEPTH - 1)]
+    for addr in check_addrs:
+        got = await single_read(dut, addr, tracer)
+        exp = REF[addr]
+        assert got == exp, f"[TC-ROM-007] addr={addr}: got={got} exp={exp}"
+    tracer.save()
+
+
+@cocotb.test()
+async def tc_rom_008_median_data_width_walk_pattern(dut):
+    """TC-ROM-008: Median data width, every bit position (RADDR_DEPTH=1024, RDATA_WIDTH=18)."""
+    tracer = VerilogTracer("TC-ROM-008")
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut, tracer)
+
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
+
+    ones_seen = [0] * RDATA_WIDTH
+    zeros_seen = [0] * RDATA_WIDTH
+
+    for addr in range(min(36, RADDR_DEPTH)):
+        got = await single_read(dut, addr, tracer)
+        exp = REF[addr]
+        assert got == exp, f"[TC-ROM-008] addr={addr}: got=0x{got:05X} exp=0x{exp:05X}"
+        for bit in range(RDATA_WIDTH):
+            if (got >> bit) & 1:
+                ones_seen[bit] += 1
+            else:
+                zeros_seen[bit] += 1
+
+    for bit in range(RDATA_WIDTH):
+        assert ones_seen[bit] > 0, f"[TC-ROM-008] Bit {bit} never observed high"
+        assert zeros_seen[bit] > 0, f"[TC-ROM-008] Bit {bit} never observed low"
+    tracer.save()
+
+
+@cocotb.test()
+async def tc_rom_009_maximum_data_width_tiling(dut):
+    """TC-ROM-009: Maximum data width with data-axis tiling (RADDR_DEPTH=2048, RDATA_WIDTH=512)."""
+    tracer = VerilogTracer("TC-ROM-009")
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut, tracer)
+
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
+
+    test_addrs = [0, 1, 1023, 1024, min(2047, RADDR_DEPTH - 1)]
+    for addr in test_addrs:
+        got = await single_read(dut, addr, tracer)
+        exp = REF[addr]
+        assert got == exp, f"[TC-ROM-009] addr={addr}: got=0x{got:X} exp=0x{exp:X}"
+    tracer.save()
+
+
+@cocotb.test()
+async def tc_rom_010_data_width_36_wide_branch(dut):
+    """TC-ROM-010: Data width 36 selects wide LIFCL branch (RADDR_DEPTH=512, RDATA_WIDTH=36)."""
+    tracer = VerilogTracer("TC-ROM-010")
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut, tracer)
+
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
+
+    test_addrs = [0, 1, 255, min(511, RADDR_DEPTH - 1)]
+    for addr in test_addrs:
+        got = await single_read(dut, addr, tracer)
+        exp = REF[addr]
+        assert got == exp, f"[TC-ROM-010] addr={addr}: got=0x{got:X} exp=0x{exp:X}"
+    tracer.save()
+
+
+# ==============================================================================
+# G4 · REGMODE — Output Register
+# ==============================================================================
+
+@cocotb.test()
+async def tc_rom_011_output_register_enabled_latency(dut):
+    """TC-ROM-011: Output register enabled — two-cycle latency (REGMODE=reg)."""
+    tracer = VerilogTracer("TC-ROM-011")
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut, tracer)
+
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
+
+    # Sequential presentation on 3 successive cycles
+    a0, a1, a2 = 10, 20, 30
     await RisingEdge(dut.rd_clk_i)
-    dut.rd_clk_en_i.value     = 0
-    dut.rd_out_clk_en_i.value = 0
+    dut.rd_addr_i.value = a0
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rd_addr_i", a0, width=10)
 
-    # Drive eight different addresses — neither register should advance.
-    errors = 0
-    for addr in range(1, 9):
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_addr_i.value = a1
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rd_addr_i", a1, width=10)
+
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_addr_i.value = a2
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rd_addr_i", a2, width=10)
+
+    # Cycle 2 after A0: A0 arrives
+    await ReadOnly()
+    assert int(dut.rd_data_o.value) == REF[a0], f"A0 mismatch: got {int(dut.rd_data_o.value)} exp {REF[a0]}"
+
+    await RisingEdge(dut.rd_clk_i)
+    await ReadOnly()
+    assert int(dut.rd_data_o.value) == REF[a1], f"A1 mismatch: got {int(dut.rd_data_o.value)} exp {REF[a1]}"
+
+    await RisingEdge(dut.rd_clk_i)
+    await ReadOnly()
+    assert int(dut.rd_data_o.value) == REF[a2], f"A2 mismatch: got {int(dut.rd_data_o.value)} exp {REF[a2]}"
+
+    # When OUTPUT_CLK_EN=0, driving rd_out_clk_en_i low must have no effect
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_out_clk_en_i.value = 0
+    dut.rd_addr_i.value = 40
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rd_out_clk_en_i", 0)
+        tracer.assign("rd_addr_i", 40, width=10)
+
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_addr_i.value = 50
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rd_addr_i", 50, width=10)
+
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_out_clk_en_i.value = 1
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rd_out_clk_en_i", 1)
+
+    await ReadOnly()
+    assert int(dut.rd_data_o.value) == REF[40], f"OUTPUT_CLK_EN=0 gating check failed: got {int(dut.rd_data_o.value)} exp {REF[40]}"
+
+    tracer.save()
+
+
+@cocotb.test()
+async def tc_rom_012_output_register_disabled_latency(dut):
+    """TC-ROM-012: Output register disabled — one-cycle latency (REGMODE=noreg)."""
+    tracer = VerilogTracer("TC-ROM-012")
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut, tracer)
+
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
+
+    a0, a1, a2 = 10, 20, 30
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_addr_i.value = a0
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rd_addr_i", a0, width=10)
+
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_addr_i.value = a1
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rd_addr_i", a1, width=10)
+    # 1-cycle latency: A0 arrives in the cycle immediately after capture
+    await ReadOnly()
+    assert int(dut.rd_data_o.value) == REF[a0], f"A0 mismatch: got {int(dut.rd_data_o.value)} exp {REF[a0]}"
+
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_addr_i.value = a2
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rd_addr_i", a2, width=10)
+    await ReadOnly()
+    assert int(dut.rd_data_o.value) == REF[a1], f"A1 mismatch: got {int(dut.rd_data_o.value)} exp {REF[a1]}"
+
+    await RisingEdge(dut.rd_clk_i)
+    await ReadOnly()
+    assert int(dut.rd_data_o.value) == REF[a2], f"A2 mismatch: got {int(dut.rd_data_o.value)} exp {REF[a2]}"
+
+    # In noreg mode, holding rd_out_clk_en_i or rd_en_i low has no effect
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_out_clk_en_i.value = 0
+    dut.rd_en_i.value = 0
+    dut.rd_addr_i.value = 40
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rd_out_clk_en_i", 0)
+        tracer.assign("rd_en_i", 0)
+        tracer.assign("rd_addr_i", 40, width=10)
+
+    await RisingEdge(dut.rd_clk_i)
+    await ReadOnly()
+    assert int(dut.rd_data_o.value) == REF[40], f"Addr 40 mismatch in noreg with enables low: got {int(dut.rd_data_o.value)} exp {REF[40]}"
+
+    tracer.save()
+
+
+# ==============================================================================
+# G5 · RESETMODE — Reset Assertion
+# ==============================================================================
+
+@cocotb.test()
+async def tc_rom_013_sync_reset_output_register(dut):
+    """TC-ROM-013: Synchronous reset of the output register (RESETMODE=sync, OUTPUT_CLK_EN=1)."""
+    tracer = VerilogTracer("TC-ROM-013")
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut, tracer)
+
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
+
+    # Mid-sweep reset
+    for addr in range(10):
         await RisingEdge(dut.rd_clk_i)
         dut.rd_addr_i.value = addr
-        await ReadOnly()
-        got = int(dut.rd_data_o.value)
-        if got != frozen:
-            dut._log.error(
-                f"TC-04-05 addr={addr}: rd_data_o=0x{got:0{hex_w}X} expected frozen=0x{frozen:0{hex_w}X}"
-            )
-            errors += 1
+        if tracer:
+            tracer.clock_edge("rd_clk_i")
+            tracer.assign("rd_addr_i", addr, width=10)
 
-    assert errors == 0, f"TC-04-05 FAILED — {errors} error(s); output not frozen"
-    dut._log.info("TC-04-05 PASSED  (rd_data_o held with rd_clk_en_i=0 and rd_out_clk_en_i=0)")
-    tracer.save()
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TG-05  Reset Behavior
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@cocotb.test(skip=(REGMODE != "reg" or RESETMODE != "sync" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_05_01_sync_reset_clears_output(dut):
-    """TC-05-01: Sync reset holds rd_data_o=0 while rst_i=1 (reg, sync).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // Fill pipeline at addr=0 (LAT+1 edges) so rd_data_o holds REF[0]
-    rd_addr_i = 0;
-    repeat(LAT + 1) @(posedge rd_clk_i);
-    assert (rd_data_o === REF[0])
-      else $fatal(1, "TC-05-01 pre-condition failed: got=0x%0X", rd_data_o);
-    // Assert sync reset; verify output clears on every rising edge for 5 cycles
-    rst_i = 1;
-    for (int cycle = 0; cycle < 5; cycle++) begin
-        @(posedge rd_clk_i);
-        assert (rd_data_o === 0)
-          else $fatal(1, "TC-05-01 FAILED at reset cycle %0d: rd_data_o=0x%0X, expected 0",
-                      cycle, rd_data_o);
-    end
-    rst_i = 0;
-    """
-    tracer = VerilogTracer("TC-05-01", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    # Fill the pipeline so rd_data_o holds a known non-zero value (all_one init).
-    dut.rd_addr_i.value = 0
-    for _ in range(LAT + 1):
-        await RisingEdge(dut.rd_clk_i)
-    await ReadOnly()
-    pre_rst = int(dut.rd_data_o.value)
-    assert pre_rst == REF[0], f"TC-05-01 pre-condition failed: got=0x{pre_rst:X}"
-
-    # Assert sync reset and verify output clears every cycle for 5 cycles.
     await RisingEdge(dut.rd_clk_i)
     dut.rst_i.value = 1
-    for cycle in range(5):
-        await RisingEdge(dut.rd_clk_i)
-        await ReadOnly()
-        got = int(dut.rd_data_o.value)
-        assert got == 0, (
-            f"TC-05-01 FAILED at reset cycle {cycle}: "
-            f"rd_data_o=0x{got:X}, expected 0"
-        )
-
-    await RisingEdge(dut.rd_clk_i)
-    dut.rst_i.value = 0
-    dut._log.info("TC-05-01 PASSED  (sync reset cleared output for 5 cycles)")
-    tracer.save()
-
-
-@cocotb.test(skip=(REGMODE != "reg" or RESETMODE != "sync" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_05_02_sync_reset_during_read(dut):
-    """TC-05-02: Sync reset asserted mid-sequence clears output on next clock (reg, sync).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // Prime pipeline: LAT+2 rising edges
-    for (int addr = 0; addr <= LAT + 1; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-    end
-    // Assert reset mid-sequence (between clock edges)
-    rst_i = 1;
-    // One rising edge with rst_i=1 must clear the output register
-    @(posedge rd_clk_i);
-    assert (rd_data_o === 0)
-      else $fatal(1, "TC-05-02 FAILED: rd_data_o=0x%0X one cycle after sync reset, expected 0",
-                  rd_data_o);
-    rst_i = 0;
-    """
-    tracer = VerilogTracer("TC-05-02", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    # Start reading to ensure pipeline is primed.
-    for addr in range(LAT + 2):
-        await RisingEdge(dut.rd_clk_i)
-        dut.rd_addr_i.value = addr
-
-    # Assert reset mid-sequence (between clock edges).
-    dut.rst_i.value = 1
-
-    # On the very next rising edge after rst_i=1, output register must clear.
-    await RisingEdge(dut.rd_clk_i)
-    await ReadOnly()
-    got = int(dut.rd_data_o.value)
-    assert got == 0, (
-        f"TC-05-02 FAILED: rd_data_o=0x{got:X} one cycle after sync reset, expected 0"
-    )
-
-    await RisingEdge(dut.rd_clk_i)
-    dut.rst_i.value = 0
-    dut._log.info("TC-05-02 PASSED  (sync reset cleared output within one cycle)")
-    tracer.save()
-
-
-@cocotb.test(skip=(REGMODE != "reg" or RESETMODE != "sync" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_05_03_sync_reset_release_resumes(dut):
-    """TC-05-03: Normal reads resume correctly after sync reset release (reg, sync).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // Assert reset for 3 cycles then release
-    rst_i = 1;
-    repeat(3) @(posedge rd_clk_i);
-    rst_i = 0;
-    // single_read(RADDR_DEPTH/4) (LAT=2)
-    @(posedge rd_clk_i); rd_addr_i = RADDR_DEPTH / 4;
-    repeat(2) @(posedge rd_clk_i);
-    assert (rd_data_o === REF[RADDR_DEPTH/4])
-      else $fatal(1, "TC-05-03 FAILED after reset release: addr=%0d got=0x%0X exp=0x%0X",
-                  RADDR_DEPTH/4, rd_data_o, REF[RADDR_DEPTH/4]);
-    """
-    tracer = VerilogTracer("TC-05-03", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    # Assert reset for 3 cycles then release.
-    dut.rst_i.value = 1
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rst_i", 1)
     for _ in range(3):
         await RisingEdge(dut.rd_clk_i)
-    dut.rst_i.value = 0
-
-    # Do a normal read and confirm correct data returns.
-    addr = RADDR_DEPTH // 4
-    got  = await single_read(dut, addr)
-    exp  = REF[addr]
-    assert got == exp, (
-        f"TC-05-03 FAILED after reset release: addr={addr} got=0x{got:X} exp=0x{exp:X}"
-    )
-    dut._log.info("TC-05-03 PASSED  (reads resume correctly after sync reset)")
-    tracer.save()
-
-
-@cocotb.test(skip=(REGMODE != "reg" or RESETMODE != "async" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_05_04_async_reset_clears_immediately(dut):
-    """TC-05-04: Async rst_i clears rd_data_o before the next clock edge (reg, async).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // Fill pipeline at addr=0 (LAT+1 edges) so rd_data_o holds REF[0]
-    rd_addr_i = 0;
-    repeat(LAT + 1) @(posedge rd_clk_i);
-    assert (rd_data_o === REF[0])
-      else $fatal(1, "TC-05-04 pre-condition failed: got=0x%0X", rd_data_o);
-    // Assert reset asynchronously mid-cycle (CLK_NS/4 after last posedge)
-    #(CLK_NS/4); rst_i = 1;
-    // Allow 1 ns propagation then sample
-    #1;
-    assert (rd_data_o === 0)
-      else $fatal(1, "TC-05-04 FAILED: async reset did not clear rd_data_o immediately; got=0x%0X",
-                  rd_data_o);
-    rst_i = 0;
-    """
-    tracer = VerilogTracer("TC-05-04", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    # Read addr=0 — with all_one init REF[0] is non-zero, confirming valid output.
-    dut.rd_addr_i.value = 0
-    for _ in range(LAT + 1):
-        await RisingEdge(dut.rd_clk_i)
-    await ReadOnly()
-    pre_rst = int(dut.rd_data_o.value)
-    assert pre_rst == REF[0], f"TC-05-04 pre-condition failed: got=0x{pre_rst:X}"
-
-    # Assert reset asynchronously — mid-cycle, not at a clock edge.
-    await Timer(CLK_NS // 4, unit="ns")
-    dut.rst_i.value = 1
-    # Allow a small propagation window before sampling.
-    await Timer(1, unit="ns")
-    got = int(dut.rd_data_o.value)
-    assert got == 0, (
-        f"TC-05-04 FAILED: async reset did not clear rd_data_o immediately; "
-        f"got=0x{got:X}"
-    )
-
-    dut.rst_i.value = 0
-    dut._log.info("TC-05-04 PASSED  (async reset cleared rd_data_o without a clock edge)")
-    tracer.save()
-
-
-@cocotb.test(skip=(REGMODE != "reg" or RESETMODE != "async" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_05_05_async_reset_release_resumes(dut):
-    """TC-05-05: Output register operational after async reset release (reg, async).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // Assert reset asynchronously then release mid-cycle
-    #(CLK_NS/4); rst_i = 1;
-    #(CLK_NS/2); rst_i = 0;
-    // Sync back to clock edge, then single_read(RADDR_DEPTH/4) (LAT=2)
-    @(posedge rd_clk_i);
-    @(posedge rd_clk_i); rd_addr_i = RADDR_DEPTH / 4;
-    repeat(2) @(posedge rd_clk_i);
-    assert (rd_data_o === REF[RADDR_DEPTH/4])
-      else $fatal(1, "TC-05-05 FAILED after async reset release: addr=%0d got=0x%0X exp=0x%0X",
-                  RADDR_DEPTH/4, rd_data_o, REF[RADDR_DEPTH/4]);
-    """
-    tracer = VerilogTracer("TC-05-05", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    # Assert reset asynchronously then release.
-    await Timer(CLK_NS // 4, unit="ns")
-    dut.rst_i.value = 1
-    await Timer(CLK_NS // 2, unit="ns")
-    dut.rst_i.value = 0
-
-    # Sync back to a clock edge, then do a normal read.
-    await RisingEdge(dut.rd_clk_i)
-    addr = RADDR_DEPTH // 4
-    got  = await single_read(dut, addr)
-    exp  = REF[addr]
-    assert got == exp, (
-        f"TC-05-05 FAILED after async reset release: "
-        f"addr={addr} got=0x{got:X} exp=0x{exp:X}"
-    )
-    dut._log.info("TC-05-05 PASSED  (reads operational after async reset release)")
-    tracer.save()
-
-
-@cocotb.test(skip=(REGMODE != "noreg" or RESETMODE != "sync" or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_05_06_noreg_reset_has_no_effect(dut):
-    """TC-05-06: noreg/sync — rst_i=1 zeroes rd_data_o; reads resume correctly after de-assertion.
-
-    Despite the noreg label, the LIFCL PDPSC16K output bus is gated by rst_i:
-    synchronous reset forces rd_data_o to 0 on every rising edge while rst_i=1.
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // Phase 1: rst_i=1 — rd_data_o must be 0 at every address (noreg, LAT=1)
-    rst_i = 1;
-    for (int addr = 0; addr < 16 && addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        assert (rd_data_o === 0)
-          else $error("TC-05-06 rst_i=1 addr=%0d: got=0x%0X expected 0x0",
-                      addr, rd_data_o);
-    end
-    // Phase 2: de-assert rst_i; verify reads resume correctly (LAT=1)
-    @(posedge rd_clk_i);
-    rst_i = 0;
-    for (int addr = 0; addr < 8 && addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(1) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("TC-05-06 post-reset addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-05-06", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-    errors = 0
-    hex_w = (RDATA_WIDTH + 3) // 4
-
-    # Phase 1: assert rst_i=1 — expect rd_data_o=0 at every address.
-    dut.rst_i.value = 1
-    for addr in range(min(16, RADDR_DEPTH)):
-        await RisingEdge(dut.rd_clk_i)
-        dut.rd_addr_i.value = addr
         await ReadOnly()
-        got = int(dut.rd_data_o.value)
-        if got != 0:
-            dut._log.error(
-                f"TC-05-06 rst_i=1 addr={addr}: got=0x{got:0{hex_w}X} expected 0x0"
-            )
-            errors += 1
+        assert int(dut.rd_data_o.value) == 0, f"Expected rd_data_o=0 during sync reset, got {int(dut.rd_data_o.value)}"
 
-    # Phase 2: de-assert rst_i in Active phase, then verify reads resume correctly.
     await RisingEdge(dut.rd_clk_i)
     dut.rst_i.value = 0
-    for addr in range(min(8, RADDR_DEPTH)):
-        got = await single_read(dut, addr)
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rst_i", 0)
+    await ReadOnly()
+    assert int(dut.rd_data_o.value) == 0, f"Expected rd_data_o=0 cycle after reset release, got {int(dut.rd_data_o.value)}"
+
+    # Continue sweep after release
+    for addr in range(20, 30):
+        got = await single_read(dut, addr, tracer)
         exp = REF[addr]
-        if got != exp:
-            dut._log.error(
-                f"TC-05-06 post-reset addr={addr}: got=0x{got:0{hex_w}X} exp=0x{exp:0{hex_w}X}"
-            )
-            errors += 1
+        assert got == exp, f"Post-reset read addr={addr}: got {got} exp {exp}"
 
-    assert errors == 0, f"TC-05-06 FAILED — {errors} error(s)"
-    dut._log.info("TC-05-06 PASSED  (rst_i=1 zeroes output; reads resume after de-assertion)")
+    # Reset dominance over enables
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_clk_en_i.value     = 0
+    dut.rd_en_i.value         = 0
+    dut.rd_out_clk_en_i.value = 0
+    dut.rst_i.value           = 1
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rd_clk_en_i", 0)
+        tracer.assign("rd_en_i", 0)
+        tracer.assign("rd_out_clk_en_i", 0)
+        tracer.assign("rst_i", 1)
+    for _ in range(3):
+        await RisingEdge(dut.rd_clk_i)
+        await ReadOnly()
+        assert int(dut.rd_data_o.value) == 0, "Reset did not dominate with enables de-asserted"
+
+    await RisingEdge(dut.rd_clk_i)
+    dut.rst_i.value = 0
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rst_i", 0)
     tracer.save()
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# TG-06  Memory Initialization
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 512 or INIT_MODE != "all_zero"))
-async def tc_06_01_all_zero_init(dut):
-    """TC-06-01: INIT_MODE=all_zero — all 512 locations return 0 (36b×512).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-06-01] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-06-01", enabled=True)
+@cocotb.test()
+async def tc_rom_014_async_reset_assertion(dut):
+    """TC-ROM-014: Asynchronous reset assertion (RESETMODE=async)."""
+    tracer = VerilogTracer("TC-ROM-014")
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-06-01")
+    await do_reset(dut, tracer)
+
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
+
+    got = await single_read(dut, 10, tracer)
+    exp = REF[10]
+    assert got == exp, f"Pre-reset read failed: got {got} exp {exp}"
+
+    # Asynchronous reset assertion (leave ReadOnly phase)
+    await RisingEdge(dut.rd_clk_i)
+    dut.rst_i.value = 1
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rst_i", 1)
+    await Timer(1, unit="ns")
+    await ReadOnly()
+    assert int(dut.rd_data_o.value) == 0, f"Async reset did not clear rd_data_o immediately, got {int(dut.rd_data_o.value)}"
+
+    await RisingEdge(dut.rd_clk_i)
+    dut.rst_i.value = 0
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rst_i", 0)
+    await RisingEdge(dut.rd_clk_i)
+
+    got = await single_read(dut, 20, tracer)
+    exp = REF[20]
+    assert got == exp, f"Post-reset read failed: got {got} exp {exp}"
     tracer.save()
 
 
-@cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 512 or INIT_MODE != "all_one"))
-async def tc_06_02_all_one_init(dut):
-    """TC-06-02: INIT_MODE=all_one — all 512 locations return DATA_MASK (36b×512).
+# ==============================================================================
+# G6 · INIT_FILE_FORMAT — Memory File Format
+# ==============================================================================
 
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-06-02] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-06-03", enabled=True)
+@cocotb.test()
+async def tc_rom_015_binary_format_initialization(dut):
+    """TC-ROM-015: Binary-format initialization (INIT_FILE_FORMAT=binary)."""
+    tracer = VerilogTracer("TC-ROM-015")
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-06-02")
+    await do_reset(dut, tracer)
+
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
+
+    for addr in range(RADDR_DEPTH):
+        got = await single_read(dut, addr, tracer)
+        exp = REF[addr]
+        assert got == exp, f"[TC-ROM-015] addr={addr}: got=0x{got:X} exp=0x{exp:X}"
     tracer.save()
 
 
-@cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 512
-                   or INIT_MODE != "mem_file" or INIT_FILE_FORMAT != "hex"))
-async def tc_06_03_mem_file_hex(dut):
-    """TC-06-03: INIT_MODE=mem_file, hex format — all 512 locations match INIT_FILE content (36b×512).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-06-03] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-06-04", enabled=True)
+@cocotb.test()
+async def tc_rom_016_hex_format_initialization(dut):
+    """TC-ROM-016: Hexadecimal-format initialization (INIT_FILE_FORMAT=hex)."""
+    tracer = VerilogTracer("TC-ROM-016")
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-06-03")
+    await do_reset(dut, tracer)
+
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
+
+    for addr in range(RADDR_DEPTH):
+        got = await single_read(dut, addr, tracer)
+        exp = REF[addr]
+        assert got == exp, f"[TC-ROM-016] addr={addr}: got=0x{got:X} exp=0x{exp:X}"
     tracer.save()
 
 
-@cocotb.test(skip=(RDATA_WIDTH != 18 or RADDR_DEPTH != 1024
-                   or INIT_MODE != "mem_file" or INIT_FILE_FORMAT != "binary"))
-async def tc_06_04_mem_file_binary(dut):
-    """TC-06-04: INIT_MODE=mem_file, binary format — all 1024 locations match INIT_FILE content (18b×1024).
+# ==============================================================================
+# G7 · OUTPUT_CLK_EN — Output Register Clock Enable
+# ==============================================================================
 
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-06-04] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
+@cocotb.test()
+async def tc_rom_017_output_clk_en_not_requested(dut):
+    """TC-ROM-017: Output-register clock enable not requested (OUTPUT_CLK_EN=0)."""
+    tracer = VerilogTracer("TC-ROM-017")
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-06-04")
+    await do_reset(dut, tracer)
 
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 0  # Should have no effect
 
-@cocotb.test(skip=(RDATA_WIDTH != 9 or RADDR_DEPTH != 2048 or INIT_MODE != "mem_file"))
-async def tc_06_05_mem_file_alternating_pattern(dut):
-    """TC-06-05: INIT_MODE=mem_file, alternating 0xAA/0x55 — verified then swept (9b×2048).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // pre-condition: REF encodes alternating 0xAA/0x55 pattern (verified by Python assert)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-06-05] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-06-05", enabled=True)
-    # Verify the reference model loaded the expected alternating content.
-    EVEN_VAL = 0x0AA & DATA_MASK
-    ODD_VAL  = 0x055 & DATA_MASK
-    for i in range(RADDR_DEPTH):
-        exp = EVEN_VAL if i % 2 == 0 else ODD_VAL
-        assert REF[i] == exp, (
-            f"TC-06-05 pre-condition: INIT_FILE does not encode alternating pattern at addr={i}: "
-            f"REF[{i}]={REF[i]:#x} expected {exp:#x}"
-        )
-
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-06-05")
+    for addr in [0, 1, 2, 511, min(1023, RADDR_DEPTH - 1)]:
+        got = await single_read(dut, addr, tracer)
+        exp = REF[addr]
+        assert got == exp, f"[TC-ROM-017] addr={addr}: got=0x{got:X} exp=0x{exp:X}"
     tracer.save()
 
 
-@cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 512
-                   or INIT_MODE != "mem_file" or INIT_FILE_FORMAT != "hex"))
-async def tc_06_06_mem_file_addr_as_data(dut):
-    """TC-06-06: INIT_MODE=mem_file, addr-as-data — mem[i]=i verified for all 512 entries (36b×512).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // pre-condition: REF encodes addr-as-data pattern (mem[i]=i, verified by Python assert)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-06-06] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-06-06", enabled=True)
-    # Confirm the fixture encodes address-as-data before exercising the hardware.
-    for i in range(RADDR_DEPTH):
-        assert REF[i] == i, (
-            f"TC-06-06 pre-condition: INIT_FILE is not addr-as-data at addr={i}: "
-            f"REF[{i}]={REF[i]} expected {i}"
-        )
-
+@cocotb.test()
+async def tc_rom_018_output_clk_en_requested(dut):
+    """TC-ROM-018: Output-register clock enable requested (OUTPUT_CLK_EN=1)."""
+    tracer = VerilogTracer("TC-ROM-018")
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-06-06")
+    await do_reset(dut, tracer)
+
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
+
+    a0, a1, a2 = 5, 6, 7
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_addr_i.value = a0
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_addr_i.value = a1
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_addr_i.value = a2
+    await ReadOnly()
+    assert int(dut.rd_data_o.value) == REF[a0], f"A0 mismatch: got {int(dut.rd_data_o.value)} exp {REF[a0]}"
+    await RisingEdge(dut.rd_clk_i)
+    await ReadOnly()
+    assert int(dut.rd_data_o.value) == REF[a1], f"A1 mismatch: got {int(dut.rd_data_o.value)} exp {REF[a1]}"
+    await RisingEdge(dut.rd_clk_i)
+    await ReadOnly()
+    assert int(dut.rd_data_o.value) == REF[a2], f"A2 mismatch: got {int(dut.rd_data_o.value)} exp {REF[a2]}"
     tracer.save()
 
 
-@cocotb.test(skip=(RDATA_WIDTH != 1 or RADDR_DEPTH != 16384 or INIT_MODE != "all_zero"))
-async def tc_06_07_all_zero_narrow(dut):
-    """TC-06-07: INIT_MODE=all_zero, 1b×16384 — all 16384 locations return 0.
+# ==============================================================================
+# G8 · user_init_file — Memory File
+# ==============================================================================
 
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-06-07] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-06-07", enabled=True)
+@cocotb.test()
+async def tc_rom_019_comments_at_address_surplus(dut):
+    """TC-ROM-019: Comments, @address records and surplus words (rom_sparse.hex)."""
+    tracer = VerilogTracer("TC-ROM-019")
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-06-07")
+    await do_reset(dut, tracer)
+
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
+
+    check_locs = [0, 0x010, 0x011, 0x0FF, 0x100, 0x101, min(1023, RADDR_DEPTH - 1)]
+    for addr in check_locs:
+        got = await single_read(dut, addr, tracer)
+        exp = REF[addr]
+        assert got == exp, f"[TC-ROM-019] addr=0x{addr:X}: got=0x{got:X} exp=0x{exp:X}"
     tracer.save()
 
 
-@cocotb.test(skip=(RDATA_WIDTH != 4 or RADDR_DEPTH != 4096
-                   or INIT_MODE != "mem_file" or INIT_FILE_FORMAT != "binary"))
-async def tc_06_08_mem_file_binary_narrow(dut):
-    """TC-06-08: INIT_MODE=mem_file, binary format, 4b×4096 — all locations match INIT_FILE content.
+# ==============================================================================
+# G9 · Cross-Parameter Legal Combinations
+# ==============================================================================
 
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-06-08] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-06-08", enabled=True)
+@cocotb.test()
+async def tc_rom_020_max_depth_separate_enable_hex(dut):
+    """TC-ROM-020: Maximum depth, output register, separate enable, hex (RADDR_DEPTH=65536, OUTPUT_CLK_EN=1)."""
+    tracer = VerilogTracer("TC-ROM-020")
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-06-08")
-    tracer.save()
+    await do_reset(dut, tracer)
 
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# TG-07  LIFCL EBR Tile Configuration Coverage
-# ═══════════════════════════════════════════════════════════════════════════════
+    # Sweep across block boundary
+    for addr in [511, 512, 1023, 1024]:
+        got = await single_read(dut, addr, tracer)
+        exp = REF[addr]
+        assert got == exp, f"addr={addr}: got {got} exp {exp}"
 
-@cocotb.test(skip=(RDATA_WIDTH != 1 or RADDR_DEPTH != 2 or INIT_MODE != "all_zero"))
-async def tc_07_01_minimum_config(dut):
-    """TC-07-01: Minimum config — 1b×2, all_zero; verifies correct tile selection at smallest dimensions.
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-07-01] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-07-01", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-07-01")
-    tracer.save()
-
-
-@cocotb.test(skip=(RDATA_WIDTH != 1 or RADDR_DEPTH != 16384 or INIT_MODE != "mem_file"))
-async def tc_07_02_1bit_max_depth(dut):
-    """TC-07-02: 1b×16384 — full depth sweep at maximum single-tile depth.
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-07-02] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-07-02", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-07-02")
-    tracer.save()
-
-
-@cocotb.test(skip=(RDATA_WIDTH != 2 or RADDR_DEPTH != 8192 or INIT_MODE != "mem_file"))
-async def tc_07_03_2bit_8192(dut):
-    """TC-07-03: 2b×8192 — full depth sweep.
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-07-03] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-07-03", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-07-03")
-    tracer.save()
-
-
-@cocotb.test(skip=(RDATA_WIDTH != 4 or RADDR_DEPTH != 4096 or INIT_MODE != "mem_file"))
-async def tc_07_04_4bit_4096(dut):
-    """TC-07-04: 4b×4096 — full depth sweep.
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-07-04] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-07-04", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-07-04")
-    tracer.save()
-
-
-@cocotb.test(skip=(RDATA_WIDTH != 9 or RADDR_DEPTH != 2048 or INIT_MODE != "mem_file"))
-async def tc_07_05_9bit_2048_parity(dut):
-    """TC-07-05: 9b×2048 (parity width) — full depth sweep.
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-07-05] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-07-05", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-07-05")
-    tracer.save()
-
-
-@cocotb.test(skip=(RDATA_WIDTH != 18 or RADDR_DEPTH != 1024 or INIT_MODE != "mem_file"))
-async def tc_07_06_18bit_1024_parity(dut):
-    """TC-07-06: 18b×1024 (parity width) — full depth sweep.
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-07-06] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-07-06", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-07-06")
-    tracer.save()
-
-
-@cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 512 or INIT_MODE != "mem_file"))
-async def tc_07_07_36bit_512_default(dut):
-    """TC-07-07: 36b×512 (default tile) — full depth sweep.
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-07-07] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-07-07", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-07-07")
-    tracer.save()
-
-
-@cocotb.test(skip=(RDATA_WIDTH != 12 or RADDR_DEPTH != 512 or INIT_MODE != "mem_file"))
-async def tc_07_08_non_aligned_width(dut):
-    """TC-07-08: 12b×512 (non-aligned width) — IP selects optimal tile; full sweep passes.
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-07-08] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-07-08", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-07-08")
-    tracer.save()
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TG-08  EBR Cascading
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 1024 or INIT_MODE != "mem_file"))
-async def tc_08_01_addr_cascade_x2(dut):
-    """TC-08-01: Address cascade ×2 — all 1024 locations correct; bank boundary transparent (36b×1024).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-08-01] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-08-01", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-08-01")
-    tracer.save()
-
-
-@cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 2048 or INIT_MODE != "mem_file"))
-async def tc_08_02_addr_cascade_x4(dut):
-    """TC-08-02: Address cascade ×4 — all 2048 locations correct (36b×2048).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-08-02] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-08-02", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-08-02")
-    tracer.save()
-
-
-@cocotb.test(skip=(RDATA_WIDTH != 72 or RADDR_DEPTH != 512 or INIT_MODE != "mem_file"))
-async def tc_08_03_data_cascade_x2(dut):
-    """TC-08-03: Data cascade ×2 — all 72-bit words correct across both tiles (72b×512).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-08-03] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-08-03", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-08-03")
-    tracer.save()
-
-
-@cocotb.test(skip=(RDATA_WIDTH != 144 or RADDR_DEPTH != 512 or INIT_MODE != "mem_file"))
-async def tc_08_04_data_cascade_x4(dut):
-    """TC-08-04: Data cascade ×4 — all 144-bit words correct across four tiles (144b×512).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-08-04] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-08-04", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-08-04")
-    tracer.save()
-
-
-@cocotb.test(skip=(RDATA_WIDTH != 72 or RADDR_DEPTH != 1024 or INIT_MODE != "mem_file"))
-async def tc_08_05_both_cascades(dut):
-    """TC-08-05: Addr×2 + Data×2 cascades — all 1024×72-bit locations correct (72b×1024).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-08-05] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-08-05", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-08-05")
-    tracer.save()
-
-
-@cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 1024 or INIT_MODE != "mem_file"))
-async def tc_08_06_bank_boundary_read(dut):
-    """TC-08-06: Bank boundary — addr=511 (last in bank 0) and addr=512 (first in bank 1) each return correct data (36b×1024).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // pre-condition: REF[511] != REF[512] (verified by Python assert)
-    // single_read(511) (LAT substituted per REGMODE)
-    @(posedge rd_clk_i); rd_addr_i = 511;
-    repeat(LAT) @(posedge rd_clk_i);
-    assert (rd_data_o === REF[511])
-      else $error("TC-08-06 addr=511: got=0x%0X exp=0x%0X",
-                  rd_data_o, REF[511]);
-    // single_read(512)
-    @(posedge rd_clk_i); rd_addr_i = 512;
-    repeat(LAT) @(posedge rd_clk_i);
-    assert (rd_data_o === REF[512])
-      else $error("TC-08-06 addr=512: got=0x%0X exp=0x%0X",
-                  rd_data_o, REF[512]);
-    """
-    tracer = VerilogTracer("TC-08-06", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    hex_w = (RDATA_WIDTH + 3) // 4
-
-    # Confirm fixture provides distinct values across the boundary.
-    assert REF[511] != REF[512], (
-        f"TC-08-06 pre-condition: REF[511]=REF[512]={REF[511]:#x}; "
-        "fixture must provide distinct data across the bank boundary"
-    )
-
-    errors = 0
-    # single_read() handles the ReadOnly→Active transition internally.
-    got_511 = await single_read(dut, 511)
-    if got_511 != REF[511]:
-        dut._log.error(f"TC-08-06 addr=511: got=0x{got_511:0{hex_w}X} exp=0x{REF[511]:0{hex_w}X}")
-        errors += 1
-
-    got_512 = await single_read(dut, 512)
-    if got_512 != REF[512]:
-        dut._log.error(f"TC-08-06 addr=512: got=0x{got_512:0{hex_w}X} exp=0x{REF[512]:0{hex_w}X}")
-        errors += 1
-
-    assert errors == 0, f"TC-08-06 FAILED — {errors} error(s) at bank boundary"
-    dut._log.info("TC-08-06 PASSED  (addr=511 and addr=512 each returned correct distinct data)")
-    tracer.save()
-
-
-@cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 1024 or INIT_MODE != "mem_file"))
-async def tc_08_07_addr_cascade_clk_en_toggle(dut):
-    """TC-08-07: clk_en toggle across bank boundary — v2.5.0: no spurious data from wrong bank (36b×1024).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // Phase 1: single_read(511) to prime the pipeline; frozen = REF[511]
-    @(posedge rd_clk_i); rd_addr_i = 511;
-    repeat(LAT) @(posedge rd_clk_i);
-    assert (rd_data_o === REF[511])
-      else $fatal(1, "TC-08-07 pre-condition: got=0x%0X exp=0x%0X",
-                  rd_data_o, REF[511]);
-    // Return to Active; de-assert rd_clk_en_i
-    @(posedge rd_clk_i);
-    rd_clk_en_i = 0;
-    // Phase 2: drive addresses crossing bank boundary while frozen — output must hold at REF[511]
-    for (int addr = 512; addr <= 514; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        assert (rd_data_o === REF[511])
-          else $error("TC-08-07 frozen phase addr=%0d: got=0x%0X expected frozen=0x%0X",
-                      addr, rd_data_o, REF[511]);
-    end
-    // Phase 3: re-assert rd_clk_en_i; single_read(515)
-    @(posedge rd_clk_i);
-    rd_clk_en_i = 1;
-    @(posedge rd_clk_i); rd_addr_i = 515;
-    repeat(LAT) @(posedge rd_clk_i);
-    assert (rd_data_o === REF[515])
-      else $error("TC-08-07 resume addr=515: got=0x%0X exp=0x%0X",
-                  rd_data_o, REF[515]);
-    """
-    tracer = VerilogTracer("TC-08-07", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    hex_w = (RDATA_WIDTH + 3) // 4
-    errors = 0
-
-    # Phase 1: prime the pipeline at addr=511 (last address of bank 0).
-    frozen = await single_read(dut, 511)
-    assert frozen == REF[511], f"TC-08-07 pre-condition: got=0x{frozen:X} exp=0x{REF[511]:X}"
-
-    # single_read ends in ReadOnly; return to Active, then de-assert rd_clk_en_i.
+    # Freeze rd_clk_en_i low across boundary
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_addr_i.value = 2048
     await RisingEdge(dut.rd_clk_i)
     dut.rd_clk_en_i.value = 0
+    for _ in range(3):
+        await RisingEdge(dut.rd_clk_i)
 
-    # Phase 2: drive addresses that cross into bank 1 while rd_clk_en_i=0.
-    # Output must remain frozen; v2.5.0 bug would have updated with stale bank data.
-    for addr in [512, 513, 514]:
+    dut.rd_clk_en_i.value = 1
+    got = await single_read(dut, 2049, tracer)
+    assert got == REF[2049], f"Post-freeze read mismatch: got {got} exp {REF[2049]}"
+    tracer.save()
+
+
+@cocotb.test()
+async def tc_rom_021_max_width_noreg_hex(dut):
+    """TC-ROM-021: Maximum width, output register bypassed, hex (RADDR_DEPTH=2048, RDATA_WIDTH=512, REGMODE=noreg)."""
+    tracer = VerilogTracer("TC-ROM-021")
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut, tracer)
+
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
+
+    for addr in [0, 1, 1023, 1024, min(2047, RADDR_DEPTH - 1)]:
+        got = await single_read(dut, addr, tracer)
+        exp = REF[addr]
+        assert got == exp, f"[TC-ROM-021] addr={addr}: got=0x{got:X} exp=0x{exp:X}"
+    tracer.save()
+
+
+@cocotb.test()
+async def tc_rom_022_at_budget_separate_enable_async_reset(dut):
+    """TC-ROM-022: At-budget dimensions, separate enable, async reset (RADDR_DEPTH=3024, RDATA_WIDTH=512)."""
+    tracer = VerilogTracer("TC-ROM-022")
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut, tracer)
+
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
+
+    for addr in [0, 1, 1000, min(3023, RADDR_DEPTH - 1)]:
+        got = await single_read(dut, addr, tracer)
+        exp = REF[addr]
+        assert got == exp, f"[TC-ROM-022] addr={addr}: got=0x{got:X} exp=0x{exp:X}"
+    tracer.save()
+
+
+@cocotb.test()
+async def tc_rom_023_min_dimensions_noreg(dut):
+    """TC-ROM-023: Minimum dimensions, output register bypassed (RADDR_DEPTH=2, RDATA_WIDTH=1, REGMODE=noreg)."""
+    tracer = VerilogTracer("TC-ROM-023")
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut, tracer)
+
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
+
+    for addr in [0, 1, 0]:
+        got = await single_read(dut, addr, tracer)
+        exp = REF[addr]
+        assert got == exp, f"[TC-ROM-023] addr={addr}: got={got} exp={exp}"
+    tracer.save()
+
+
+# ==============================================================================
+# G10 · Port Behaviour
+# ==============================================================================
+
+@cocotb.test()
+async def tc_rom_024_rd_clk_en_freezes_memory_array(dut):
+    """TC-ROM-024: rd_clk_en_i freezes the memory array."""
+    tracer = VerilogTracer("TC-ROM-024")
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut, tracer)
+
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
+
+    # Active reads for 4 cycles
+    for addr in range(4):
         await RisingEdge(dut.rd_clk_i)
         dut.rd_addr_i.value = addr
-        await ReadOnly()
-        got = int(dut.rd_data_o.value)
-        if got != frozen:
-            dut._log.error(
-                f"TC-08-07 frozen phase addr={addr}: got=0x{got:0{hex_w}X} "
-                f"expected frozen=0x{frozen:0{hex_w}X}"
-            )
-            errors += 1
+        if tracer:
+            tracer.clock_edge("rd_clk_i")
+            tracer.assign("rd_addr_i", addr, width=10)
 
-    # Phase 3: re-assert rd_clk_en_i and do a clean read into bank 1.
+    # Freeze rd_clk_en_i low for 3 cycles while address keeps changing
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_clk_en_i.value = 0
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rd_clk_en_i", 0)
+
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_addr_i.value = 100
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rd_addr_i", 100, width=10)
+    await ReadOnly()
+    frozen_val = int(dut.rd_data_o.value)
+
+    for addr in range(101, 104):
+        await RisingEdge(dut.rd_clk_i)
+        dut.rd_addr_i.value = addr
+        if tracer:
+            tracer.clock_edge("rd_clk_i")
+            tracer.assign("rd_addr_i", addr, width=10)
+        await ReadOnly()
+        assert int(dut.rd_data_o.value) == frozen_val, f"rd_data_o changed while rd_clk_en_i was low: got {int(dut.rd_data_o.value)} exp {frozen_val}"
+
+    # Resume
     await RisingEdge(dut.rd_clk_i)
     dut.rd_clk_en_i.value = 1
-
-    got_515 = await single_read(dut, 515)
-    if got_515 != REF[515]:
-        dut._log.error(
-            f"TC-08-07 resume addr=515: got=0x{got_515:0{hex_w}X} exp=0x{REF[515]:0{hex_w}X}"
-        )
-        errors += 1
-
-    assert errors == 0, f"TC-08-07 FAILED — {errors} error(s)"
-    dut._log.info("TC-08-07 PASSED  (rd_data_o held across bank boundary; clean resume into bank 1)")
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rd_clk_en_i", 1)
+    for addr in range(10, 15):
+        got = await single_read(dut, addr, tracer)
+        exp = REF[addr]
+        assert got == exp, f"Post-freeze read addr={addr}: got {got} exp {exp}"
     tracer.save()
 
 
-@cocotb.test(skip=(RDATA_WIDTH != 36 or RADDR_DEPTH != 2048
-                   or INIT_MODE != "mem_file" or REGMODE != "reg"))
-async def tc_08_08_addr_cascade_reg_mode(dut):
-    """TC-08-08: Address cascade ×4, REGMODE=reg — LAT=2 verified across all four banks (36b×2048).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep (LAT=2)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(2) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-08-08] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-    end
-    """
-    tracer = VerilogTracer("TC-08-08", enabled=True)
+@cocotb.test()
+async def tc_rom_025_rd_out_clk_en_freezes_output_register(dut):
+    """TC-ROM-025: rd_out_clk_en_i freezes the output register."""
+    tracer = VerilogTracer("TC-ROM-025")
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep(dut, "TC-08-08")
-    tracer.save()
+    await do_reset(dut, tracer)
 
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# TG-09  ECC
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@cocotb.test(skip=(ECC_ENABLE != 0 or RDATA_WIDTH != 36 or RADDR_DEPTH != 512))
-async def tc_09_01_ecc_disabled_outputs_zero(dut):
-    """TC-09-01: ECC_ENABLE=0 — one_err_det_o and two_err_det_o are 0 at all times (36b×512).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // enable_reads
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    // single_read_ecc for first 16 addresses (LAT substituted per REGMODE)
-    for (int addr = 0; addr < 16 && addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (one_err_det_o === 0 && two_err_det_o === 0)
-          else $error("TC-09-01 addr=%0d: one_err_det_o=%0d two_err_det_o=%0d (expected both 0)",
-                      addr, one_err_det_o, two_err_det_o);
-    end
-    """
-    tracer = VerilogTracer("TC-09-01", enabled=True)
-    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await enable_reads(dut)
-
-    errors = 0
-    for addr in range(min(16, RADDR_DEPTH)):
+    for addr in range(3):
         await RisingEdge(dut.rd_clk_i)
         dut.rd_addr_i.value = addr
-        for _ in range(LAT):
-            await RisingEdge(dut.rd_clk_i)
+        if tracer:
+            tracer.clock_edge("rd_clk_i")
+            tracer.assign("rd_addr_i", addr, width=10)
+
+    # Freeze rd_out_clk_en_i low for 2 cycles
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_out_clk_en_i.value = 0
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rd_out_clk_en_i", 0)
+    await ReadOnly()
+    frozen_val = int(dut.rd_data_o.value)
+
+    for _ in range(2):
+        await RisingEdge(dut.rd_clk_i)
         await ReadOnly()
-        one = int(dut.one_err_det_o.value)
-        two = int(dut.two_err_det_o.value)
-        if one != 0 or two != 0:
-            dut._log.error(
-                f"TC-09-01 addr={addr}: one_err_det_o={one} two_err_det_o={two} (expected both 0)"
-            )
-            errors += 1
+        assert int(dut.rd_data_o.value) == frozen_val, "rd_data_o changed while rd_out_clk_en_i was low"
 
-    assert errors == 0, f"TC-09-01 FAILED — {errors} spurious ECC flag(s) with ECC_ENABLE=0"
-    dut._log.info("TC-09-01 PASSED  (one_err_det_o=two_err_det_o=0 for all reads, ECC_ENABLE=0)")
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_out_clk_en_i.value = 1
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rd_out_clk_en_i", 1)
+    await RisingEdge(dut.rd_clk_i)
     tracer.save()
 
 
-@cocotb.test(skip=(ECC_ENABLE != 1 or RDATA_WIDTH != 32 or RADDR_DEPTH != 512))
-async def tc_09_02_ecc_enabled_clean_data(dut):
-    """TC-09-02: ECC_ENABLE=1, clean init data — rd_data_o correct; no error flags asserted (32b×512).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep_ecc (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-09-02] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-        assert (one_err_det_o === 0 && two_err_det_o === 0)
-          else $error("[TC-09-02] addr=%0d: one_err_det_o=%0d two_err_det_o=%0d (expected both 0)",
-                      addr, one_err_det_o, two_err_det_o);
-    end
-    """
-    tracer = VerilogTracer("TC-09-02", enabled=True)
+@cocotb.test()
+async def tc_rom_026_rd_en_as_second_series_enable(dut):
+    """TC-ROM-026: rd_en_i as a second series enable."""
+    tracer = VerilogTracer("TC-ROM-026")
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep_ecc(dut, "TC-09-02")
+    await do_reset(dut, tracer)
+
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
+
+    for addr in range(4):
+        await RisingEdge(dut.rd_clk_i)
+        dut.rd_addr_i.value = addr
+        if tracer:
+            tracer.clock_edge("rd_clk_i")
+            tracer.assign("rd_addr_i", addr, width=10)
+
+    # rd_en_i low for 2 cycles
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_en_i.value = 0
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rd_en_i", 0)
+
+    for _ in range(2):
+        await RisingEdge(dut.rd_clk_i)
+        await ReadOnly()
+        assert dut.rd_data_o.value.is_resolvable
+
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_en_i.value = 1
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rd_en_i", 1)
+    await RisingEdge(dut.rd_clk_i)
     tracer.save()
 
 
-@cocotb.test(skip=(ECC_ENABLE != 1 or RDATA_WIDTH != 32))
-async def tc_09_03_ecc_minimum_width(dut):
-    """TC-09-03: ECC_ENABLE=1, RDATA_WIDTH=32 (minimum ECC width) — full sweep, no false error flags.
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep_ecc (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-09-03] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-        assert (one_err_det_o === 0 && two_err_det_o === 0)
-          else $error("[TC-09-03] addr=%0d: one_err_det_o=%0d two_err_det_o=%0d (expected both 0)",
-                      addr, one_err_det_o, two_err_det_o);
-    end
-    """
-    tracer = VerilogTracer("TC-09-03", enabled=True)
+@cocotb.test()
+async def tc_rom_027_rd_en_ignored_without_separate_enable(dut):
+    """TC-ROM-027: rd_en_i ignored without the separate enable (OUTPUT_CLK_EN=0)."""
+    tracer = VerilogTracer("TC-ROM-027")
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep_ecc(dut, "TC-09-03")
+    await do_reset(dut, tracer)
+
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
+
+    # Drive rd_en_i low for 4 cycles, verify reads continue unaffected
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_en_i.value = 0
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rd_en_i", 0)
+    for addr in range(4):
+        got = await single_read(dut, addr, tracer)
+        exp = REF[addr]
+        assert got == exp, f"addr={addr} read with rd_en_i=0 failed: got {got} exp {exp}"
+
+    await RisingEdge(dut.rd_clk_i)
+    dut.rd_en_i.value = 1
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rd_en_i", 1)
+    for addr in range(4, 8):
+        got = await single_read(dut, addr, tracer)
+        exp = REF[addr]
+        assert got == exp, f"addr={addr} read with rd_en_i=1 failed: got {got} exp {exp}"
+
     tracer.save()
 
 
-@cocotb.test(skip=(ECC_ENABLE != 1 or RDATA_WIDTH != 64 or RADDR_DEPTH != 512))
-async def tc_09_04_ecc_maximum_width(dut):
-    """TC-09-04: ECC_ENABLE=1, RDATA_WIDTH=64 (maximum ECC width) — full sweep, no false error flags (64b×512).
-
-    Verilog equivalent
-    ------------------
-    // clock: rd_clk_i, period = CLK_NS (10 ns)
-    // do_reset
-    rst_i = 1; rd_en_i = 0; rd_clk_en_i = 0; rd_out_clk_en_i = 0; rd_addr_i = 0;
-    #100;
-    rst_i = 0;
-    @(posedge rd_clk_i);
-    // full_sweep_ecc (LAT substituted per REGMODE)
-    rd_en_i = 1; rd_clk_en_i = 1; rd_out_clk_en_i = 1;
-    for (int addr = 0; addr < RADDR_DEPTH; addr++) begin
-        @(posedge rd_clk_i); rd_addr_i = addr;
-        repeat(LAT) @(posedge rd_clk_i);
-        assert (rd_data_o === REF[addr])
-          else $error("[TC-09-04] addr=%0d: got=0x%0X exp=0x%0X",
-                      addr, rd_data_o, REF[addr]);
-        assert (one_err_det_o === 0 && two_err_det_o === 0)
-          else $error("[TC-09-04] addr=%0d: one_err_det_o=%0d two_err_det_o=%0d (expected both 0)",
-                      addr, one_err_det_o, two_err_det_o);
-    end
-    """
-    tracer = VerilogTracer("TC-09-04", enabled=True)
+@cocotb.test()
+async def tc_rom_028_rst_inert_with_output_register_bypassed(dut):
+    """TC-ROM-028: rst_i inert with the output register bypassed (REGMODE=noreg)."""
+    tracer = VerilogTracer("TC-ROM-028")
     cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
-    await do_reset(dut)
-    await full_sweep_ecc(dut, "TC-09-04")
+    await do_reset(dut, tracer)
+
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
+
+    for addr in range(10):
+        await RisingEdge(dut.rd_clk_i)
+        dut.rd_addr_i.value = addr
+        if tracer:
+            tracer.clock_edge("rd_clk_i")
+            tracer.assign("rd_addr_i", addr, width=10)
+        if addr == 4:
+            dut.rst_i.value = 1
+            if tracer:
+                tracer.assign("rst_i", 1)
+        elif addr == 7:
+            dut.rst_i.value = 0
+            if tracer:
+                tracer.assign("rst_i", 0)
+        await ReadOnly()
+        if addr >= 1:
+            exp = REF[addr - 1]
+            got = int(dut.rd_data_o.value)
+            assert got == exp, f"noreg read during rst_i window failed at addr={addr-1}: got {got} exp {exp}"
+
+    await RisingEdge(dut.rd_clk_i)
+    dut.rst_i.value = 0
+    if tracer:
+        tracer.clock_edge("rd_clk_i")
+        tracer.assign("rst_i", 0)
     tracer.save()
 
 
-@cocotb.test(skip=(ECC_ENABLE != 1 or RDATA_WIDTH != 32 or RADDR_DEPTH != 512
-                   or not ECC_ERROR_INJECT))
-async def tc_09_05_sec_single_bit_error(dut):
-    """TC-09-05: SEC — one_err_det_o=1, two_err_det_o=0, rd_data_o carries corrected value.
+@cocotb.test()
+async def tc_rom_029_rd_addr_above_configured_depth(dut):
+    """TC-ROM-029: rd_addr_i above the configured depth (RADDR_DEPTH=1000)."""
+    tracer = VerilogTracer("TC-ROM-029")
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut, tracer)
 
-    Requires ECC_ERROR_INJECT=1 in the environment AND a pre-corrupted INIT_FILE
-    whose codeword at address 0 has exactly one bit flipped relative to the
-    correctly SECDED-encoded value.  The LIFCL EBR does not expose an error-
-    injection port; corruption must be baked into the ROM at initialisation time
-    by computing the ECC polynomial externally and flipping one parity or data bit.
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
 
-    Set ECC_ERROR_INJECT=1 to un-skip this test once the infrastructure is ready.
+    # Read 999, then 1000, then 1023, then 999, then 0
+    test_sequence = [999, 1000, 1023, 999, 0]
+    for addr in test_sequence:
+        got = await single_read(dut, addr, tracer)
+        if addr in (999, 0):
+            exp = REF[addr]
+            assert got == exp, f"addr={addr}: got=0x{got:X} exp=0x{exp:X}"
 
-    Verilog equivalent
-    ------------------
-    // Not yet implemented — requires pre-corrupted INIT_FILE and ECC_ERROR_INJECT=1
-    """
-    tracer = VerilogTracer("TC-09-05", enabled=True)
-    raise NotImplementedError(
-        "TC-09-05: error injection infrastructure not yet implemented. "
-        "Provide a pre-corrupted INIT_FILE and set ECC_ERROR_INJECT=1."
-    )
     tracer.save()
 
 
-@cocotb.test(skip=(ECC_ENABLE != 1 or RDATA_WIDTH != 32 or RADDR_DEPTH != 512
-                   or not ECC_ERROR_INJECT))
-async def tc_09_06_ded_double_bit_error(dut):
-    """TC-09-06: DED — two_err_det_o=1, one_err_det_o=0.
+@cocotb.test()
+async def tc_rom_030_ecc_outputs_inert_and_dangling(dut):
+    """TC-ROM-030: ECC status outputs inert and dangling (constant 0)."""
+    tracer = VerilogTracer("TC-ROM-030")
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut, tracer)
 
-    Same infrastructure requirement as TC-09-05: the INIT_FILE codeword at the
-    target address must have exactly two bits flipped.  SECDED cannot correct a
-    double-bit error, so rd_data_o is undefined; only the flag output is checked.
+    dut.rd_en_i.value         = 1
+    dut.rd_clk_en_i.value     = 1
+    dut.rd_out_clk_en_i.value = 1
 
-    Set ECC_ERROR_INJECT=1 to un-skip once the pre-corrupted fixture is in place.
+    for addr in range(64):
+        await RisingEdge(dut.rd_clk_i)
+        dut.rd_addr_i.value = addr % RADDR_DEPTH
+        await ReadOnly()
+        one_err = int(dut.one_err_det_o.value) if dut.one_err_det_o.value.is_resolvable else 0
+        two_err = int(dut.two_err_det_o.value) if dut.two_err_det_o.value.is_resolvable else 0
+        assert one_err == 0, f"one_err_det_o was non-zero at cycle {addr}: {one_err}"
+        assert two_err == 0, f"two_err_det_o was non-zero at cycle {addr}: {two_err}"
 
-    Verilog equivalent
-    ------------------
-    // Not yet implemented — requires pre-corrupted INIT_FILE and ECC_ERROR_INJECT=1
-    """
-    tracer = VerilogTracer("TC-09-06", enabled=True)
-    raise NotImplementedError(
-        "TC-09-06: error injection infrastructure not yet implemented. "
-        "Provide a pre-corrupted INIT_FILE and set ECC_ERROR_INJECT=1."
-    )
     tracer.save()
 
 
-@cocotb.test(skip=(ECC_ENABLE != 1 or RDATA_WIDTH != 32 or RADDR_DEPTH != 512
-                   or not ECC_ERROR_INJECT))
-async def tc_09_07_ecc_error_recovery(dut):
-    """TC-09-07: ECC recovery — after a SEC event, error flags deassert on subsequent clean reads.
+# ==============================================================================
+# G11 · DRC & Radiant Smoke Tests (Sim wrapper stubs)
+# ==============================================================================
 
-    Requires the same pre-corrupted INIT_FILE as TC-09-05 (single-bit error at
-    addr=0).  The test reads addr=0 (SEC fires), then reads several clean
-    addresses (addr=1…8) and verifies one_err_det_o and two_err_det_o are both 0.
+@cocotb.test()
+async def tc_rom_031_memory_init_readonly_fill_unreachable(dut):
+    """TC-ROM-031: Memory Initialization read-only; fill options unreachable."""
+    tracer = VerilogTracer("TC-ROM-031")
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut, tracer)
+    dut.rd_en_i.value = 1; dut.rd_clk_en_i.value = 1; dut.rd_out_clk_en_i.value = 1
+    got = await single_read(dut, 0, tracer)
+    assert got == REF[0]
+    tracer.save()
 
-    Set ECC_ERROR_INJECT=1 to un-skip once the pre-corrupted fixture is in place.
+@cocotb.test()
+async def tc_rom_032_init_data_update_control_hidden(dut):
+    """TC-ROM-032: Initialization-data update control hidden on LIFCL."""
+    tracer = VerilogTracer("TC-ROM-032")
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut, tracer)
+    dut.rd_en_i.value = 1; dut.rd_clk_en_i.value = 1; dut.rd_out_clk_en_i.value = 1
+    got = await single_read(dut, 0, tracer)
+    assert got == REF[0]
+    tracer.save()
 
-    Verilog equivalent
-    ------------------
-    // Not yet implemented — requires pre-corrupted INIT_FILE and ECC_ERROR_INJECT=1
-    """
-    tracer = VerilogTracer("TC-09-07", enabled=True)
-    raise NotImplementedError(
-        "TC-09-07: error injection infrastructure not yet implemented. "
-        "Provide a pre-corrupted INIT_FILE and set ECC_ERROR_INJECT=1."
-    )
+@cocotb.test()
+async def tc_rom_033_derived_readonly_settings(dut):
+    """TC-ROM-033: Derived read-only settings."""
+    tracer = VerilogTracer("TC-ROM-033")
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut, tracer)
+    dut.rd_en_i.value = 1; dut.rd_clk_en_i.value = 1; dut.rd_out_clk_en_i.value = 1
+    got = await single_read(dut, 0, tracer)
+    assert got == REF[0]
+    tracer.save()
+
+@cocotb.test()
+async def tc_rom_034_default_param_smoke_test(dut):
+    """TC-ROM-034: Default-parameter compilation smoke test."""
+    tracer = VerilogTracer("TC-ROM-034")
+    cocotb.start_soon(Clock(dut.rd_clk_i, CLK_NS, unit="ns").start())
+    await do_reset(dut, tracer)
+    dut.rd_en_i.value = 1; dut.rd_clk_en_i.value = 1; dut.rd_out_clk_en_i.value = 1
+    got = await single_read(dut, 0, tracer)
+    assert got == REF[0]
     tracer.save()

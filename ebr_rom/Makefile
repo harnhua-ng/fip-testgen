@@ -16,7 +16,10 @@ SHELL := /bin/bash
 #   make TESTCASE=tc_01_01_sequential_read_noreg  # single test case
 #   make all_configs              # run all required parameter combinations
 #   make noreg_36_512_sync        # run one named configuration directly
+#   make prj_create               # generate Radiant .rdf project
+#   make prj_compile              # compile project via Radiant PAR
 #   make clean                    # remove sim_build/ and results/
+#   make clean_prj                # remove Radiant project and compilation artifacts
 # ==============================================================================
 
 # ── Platform Detection & Environment Defaults ─────────────────────────────────
@@ -30,31 +33,28 @@ endif
 -include env.mk
 -include local.mk
 
-COCOTB_CONFIG ?= $(shell which cocotb-config 2>/dev/null || ( [ -x $(CURDIR)/.venv/bin/cocotb-config ] && echo $(CURDIR)/.venv/bin/cocotb-config ) || ( [ -x $(CURDIR)/.venv/Scripts/cocotb-config.exe ] && echo $(CURDIR)/.venv/Scripts/cocotb-config.exe ) || echo cocotb-config)
+COCOTB_CONFIG ?= $(shell which cocotb-config 2>/dev/null || echo cocotb-config)
 
 ifeq ($(DETECTED_OS),Windows)
     RADIANT_ROOT        ?= C:/lscc/radiant/2026.1
     FOUNDRY             ?= $(RADIANT_ROOT)/ispfpga
     LM_LICENSE_FILE     ?= $(RADIANT_ROOT)/license/license.dat
     SALT_LICENSE_SERVER ?= $(RADIANT_ROOT)/license/license.dat
-    ifneq ($(wildcard $(CURDIR)/.venv/Scripts),)
-        export PATH := $(CURDIR)/.venv/Scripts:$(PATH)
-    endif
+    PNMAINC             ?= $(RADIANT_ROOT)/bin/nt64/pnmainc.exe
     # Prepend QuestaSim and Radiant tools to PATH if not already in PATH
     ifeq ($(findstring questasim,$(PATH)),)
         export PATH := $(RADIANT_ROOT)/questasim/win64:$(RADIANT_ROOT)/bin/nt64:$(PATH)
     endif
 else
-    RADIANT_ROOT        ?= /opt/lscc/radiant/2026.1
+    RADIANT_ROOT        ?= $(or $(RADIANT_HOME),/home/rel/ng2026_1p.release/rtf,/opt/lscc/radiant/2026.1)
     FOUNDRY             ?= $(RADIANT_ROOT)/ispfpga
     LM_LICENSE_FILE     ?= 1850@ldc-virtlic02
     SALT_LICENSE_SERVER ?= 1717@lrd-virtlic-rh8-01:1717@lrd-virtlic-ha-01a:1717@lrd-virtlic-ha-01b
-    ifneq ($(wildcard $(CURDIR)/.venv/bin),)
-        export PATH := $(CURDIR)/.venv/bin:$(PATH)
-    endif
+    PNMAINC             ?= $(shell which pnmainc 2>/dev/null || ( [ -x $(RADIANT_ROOT)/bin/lin64/pnmainc ] && echo $(RADIANT_ROOT)/bin/lin64/pnmainc ) || echo pnmainc)
     ifeq ($(findstring questasim,$(PATH)),)
-        export PATH := $(RADIANT_ROOT)/questasim/linux_x86_64:$(RADIANT_ROOT)/bin/lin64:$(PATH)
+        export PATH := $(RADIANT_ROOT)/tptools/questasim/linux/questasim/bin:$(RADIANT_ROOT)/questasim/linux_x86_64:$(RADIANT_ROOT)/bin/lin64:$(PATH)
     endif
+    export LD_LIBRARY_PATH := $(RADIANT_ROOT)/bin/lin64/gnu:$(RADIANT_ROOT)/bin/lin64:$(RADIANT_ROOT)/ispfpga/bin/lin64$(if $(LD_LIBRARY_PATH),:$(LD_LIBRARY_PATH))
 endif
 
 export FOUNDRY
@@ -113,6 +113,7 @@ SIM_ARGS += -GOUTPUT_CLK_EN=$(OUTPUT_CLK_EN)
 SIM_ARGS += -GECC_ENABLE=$(ECC_ENABLE)
 SIM_ARGS += -GINIT_MODE=$(INIT_MODE)
 SIM_ARGS += -GINIT_FILE=$(INIT_FILE)
+SIM_ARGS += -GINIT_FILE_FORMAT=$(INIT_FILE_FORMAT)
 
 # device simulation library (override with DEVICE_FAMILY=lfd2nx, lfcpnx, lfmxo5, etc.)
 SIM_ARGS += -L $(DEVICE_FAMILY)
@@ -136,9 +137,17 @@ SIM_ARGS    += -do "log -r /*; run -all; quit"
 ifneq ($(DETECTED_OS),Windows)
 _PYTHON_LIB_DIR := $(shell dirname $$($(COCOTB_CONFIG) --libpython 2>/dev/null) 2>/dev/null)
 ifneq ($(_PYTHON_LIB_DIR),)
+ifneq ($(_PYTHON_LIB_DIR),/usr/lib64)
+ifneq ($(_PYTHON_LIB_DIR),/usr/lib)
 LD_LIBRARY_PATH := $(_PYTHON_LIB_DIR)$(if $(LD_LIBRARY_PATH),:$(LD_LIBRARY_PATH))
-export LD_LIBRARY_PATH
 endif
+endif
+endif
+# Ensure Radiant's bundled GNU libraries (with modern libstdc++) are always at the front of LD_LIBRARY_PATH on Linux
+ifneq ($(wildcard $(RADIANT_ROOT)/bin/lin64/gnu),)
+LD_LIBRARY_PATH := $(RADIANT_ROOT)/bin/lin64/gnu:$(RADIANT_ROOT)/bin/lin64:$(RADIANT_ROOT)/ispfpga/bin/lin64$(if $(LD_LIBRARY_PATH),:$(LD_LIBRARY_PATH))
+endif
+export LD_LIBRARY_PATH
 export LIBPYTHON_LOC    := $(shell $(COCOTB_CONFIG) --libpython 2>/dev/null)
 export PYGPI_PYTHON_BIN := $(shell $(COCOTB_CONFIG) --python-bin 2>/dev/null || which python3 2>/dev/null)
 endif
@@ -187,8 +196,14 @@ sim: results_dir
 else
 # ── CoCoTB simulation flow ────────────────────────────────────────────────────
 # Pull in cocotb's Questa Makefile rules (provides sim, compile, clean)
-include $(shell $(COCOTB_CONFIG) --makefiles)/Makefile.sim
+COCOTB_MAKEFILES_DIR := $(shell $(COCOTB_CONFIG) --makefiles 2>/dev/null)
+ifneq ($(COCOTB_MAKEFILES_DIR),)
+COCOTB_MAKEFILE := $(COCOTB_MAKEFILES_DIR)/Makefile.sim
+ifneq ($(wildcard $(COCOTB_MAKEFILE)),)
+include $(COCOTB_MAKEFILE)
 sim: results_dir
+endif
+endif
 endif
 
 # Override clean to also remove results/ and QuestaSim runtime artifacts
@@ -493,20 +508,59 @@ summary:
 drc:
 	@echo ""
 	@echo "================================================================"
-	@echo " TG-10: DRC and Parameter Validation"
+	@echo " G11: DRC and Parameter Validation"
 	@echo "================================================================"
-	python3 -m pytest src/test_drc.py -v
+	@IP_ROOT=$(CURDIR) python3 $(CURDIR)/../scripts/run_tc.py DRC
 
 # ── TC / TG named targets ─────────────────────────────────────────────────────
-# Run one test case:        make tc-01-01
-# Run all tests in a group: make tg-01
-# TG-10 DRC:                make tg-10  (delegates to pytest via make drc)
+# Run one test case:        make tc-rom-001  or  make tc-001
+# Run all tests in a group: make tg-01       or  make g1
+# G11 DRC:                  make drc         or  make g11
 #
-# Each tc-XX-YY target runs only that function in an isolated sim_build directory
-# and writes its log to results/tc-XX-YY.log.
+# Each tc-XXX target runs only that function in an isolated sim_build directory
+# and writes its log to results/tc-rom-XXX.log.
 # Each tg-XX target runs its TCs in sequence and reports a pass/fail summary.
 tc-%:
-	@IP_ROOT=$(CURDIR) python3 $(CURDIR)/../scripts/run_tc.py tc-$*
+	@IP_ROOT=$(CURDIR) python3 $(CURDIR)/../scripts/run_tc.py $*
 
 tg-%:
-	@IP_ROOT=$(CURDIR) python3 $(CURDIR)/../scripts/run_tc.py tg-$*
+	@IP_ROOT=$(CURDIR) python3 $(CURDIR)/../scripts/run_tc.py TG-$*
+
+g%:
+	@IP_ROOT=$(CURDIR) python3 $(CURDIR)/../scripts/run_tc.py G$*
+
+# ── Radiant Project Generation & Compilation ─────────────────────────────────
+PRJ_NAME ?= lscc_rom
+PRJ_DEV  ?= LFCPNX-100-9BFG484C
+PRJ_IMPL ?= impl_1
+PRJ_SYN  ?= synplify
+PRJ_DIR  ?= $(CURDIR)/proj
+
+.PHONY: prj_create create_prj project
+prj_create create_prj project:
+	@echo "Creating Radiant project $(PRJ_NAME).rdf for device $(PRJ_DEV)..."
+	@mkdir -p $(PRJ_DIR)
+	@echo 'prj_create -name $(PRJ_NAME) -dev "$(PRJ_DEV)" -impl $(PRJ_IMPL) -synthesis $(PRJ_SYN)' > $(PRJ_DIR)/create_prj.tcl
+	@echo 'prj_add_source $(CURDIR)/rtl/lscc_rom.v' >> $(PRJ_DIR)/create_prj.tcl
+	@echo 'prj_add_source $(CURDIR)/testbench/testgen_top.v' >> $(PRJ_DIR)/create_prj.tcl
+	@echo 'prj_save' >> $(PRJ_DIR)/create_prj.tcl
+	@echo 'prj_close' >> $(PRJ_DIR)/create_prj.tcl
+	cd $(PRJ_DIR) && $(PNMAINC) create_prj.tcl
+	@rm -f $(PRJ_DIR)/create_prj.tcl
+	@echo "Radiant project $(PRJ_NAME).rdf created successfully in $(PRJ_DIR)."
+
+.PHONY: prj_compile compile_prj radiant_compile
+prj_compile compile_prj radiant_compile:
+	@echo "Compiling Radiant project $(PRJ_NAME).rdf (PAR)..."
+	@echo 'prj_open $(PRJ_NAME).rdf' > $(PRJ_DIR)/run_par.tcl
+	@echo 'prj_run PAR -forceAll' >> $(PRJ_DIR)/run_par.tcl
+	@echo 'prj_close' >> $(PRJ_DIR)/run_par.tcl
+	cd $(PRJ_DIR) && $(PNMAINC) run_par.tcl
+	@rm -f $(PRJ_DIR)/run_par.tcl
+	@echo "Radiant compilation finished."
+
+.PHONY: clean_prj
+clean_prj:
+	rm -rf $(PRJ_DIR)
+	rm -f  $(CURDIR)/pnmainc.log $(CURDIR)/pnmainc.tcl
+
