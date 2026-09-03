@@ -40,7 +40,8 @@ ifeq ($(DETECTED_OS),Windows)
     FOUNDRY             ?= $(RADIANT_ROOT)/ispfpga
     LM_LICENSE_FILE     ?= $(RADIANT_ROOT)/license/license.dat
     SALT_LICENSE_SERVER ?= $(RADIANT_ROOT)/license/license.dat
-    PNMAINC             ?= $(RADIANT_ROOT)/bin/nt64/pnmainc.exe
+    RADIANTC            ?= $(shell which radiantc.exe 2>/dev/null || ( [ -x $(RADIANT_ROOT)/bin/nt64/radiantc.exe ] && echo $(RADIANT_ROOT)/bin/nt64/radiantc.exe ) || echo $(RADIANT_ROOT)/bin/nt64/pnmainc.exe)
+    PNMAINC             ?= $(RADIANTC)
     # Prepend QuestaSim and Radiant tools to PATH if not already in PATH
     ifeq ($(findstring questasim,$(PATH)),)
         export PATH := $(RADIANT_ROOT)/questasim/win64:$(RADIANT_ROOT)/bin/nt64:$(PATH)
@@ -50,7 +51,8 @@ else
     FOUNDRY             ?= $(RADIANT_ROOT)/ispfpga
     LM_LICENSE_FILE     ?= 1850@ldc-virtlic02
     SALT_LICENSE_SERVER ?= 1717@lrd-virtlic-rh8-01:1717@lrd-virtlic-ha-01a:1717@lrd-virtlic-ha-01b
-    PNMAINC             ?= $(shell which pnmainc 2>/dev/null || ( [ -x $(RADIANT_ROOT)/bin/lin64/pnmainc ] && echo $(RADIANT_ROOT)/bin/lin64/pnmainc ) || echo pnmainc)
+    RADIANTC            ?= $(shell which radiantc 2>/dev/null || ( [ -x $(RADIANT_ROOT)/bin/lin64/radiantc ] && echo $(RADIANT_ROOT)/bin/lin64/radiantc ) || echo $(RADIANT_ROOT)/bin/lin64/pnmainc)
+    PNMAINC             ?= $(RADIANTC)
     ifeq ($(findstring questasim,$(PATH)),)
         export PATH := $(RADIANT_ROOT)/tptools/questasim/linux/questasim/bin:$(RADIANT_ROOT)/questasim/linux_x86_64:$(RADIANT_ROOT)/bin/lin64:$(PATH)
     endif
@@ -542,7 +544,8 @@ prj_create create_prj project:
 	@mkdir -p $(PRJ_DIR)
 	@echo 'prj_create -name $(PRJ_NAME) -dev "$(PRJ_DEV)" -impl $(PRJ_IMPL) -synthesis $(PRJ_SYN)' > $(PRJ_DIR)/create_prj.tcl
 	@echo 'prj_add_source $(CURDIR)/rtl/lscc_rom.v' >> $(PRJ_DIR)/create_prj.tcl
-	@echo 'prj_add_source $(CURDIR)/testbench/testgen_top.v' >> $(PRJ_DIR)/create_prj.tcl
+	@echo 'prj_add_source $(CURDIR)/synth/lscc_rom_synth_wrap.v' >> $(PRJ_DIR)/create_prj.tcl
+	@echo 'prj_set_top_module "lscc_rom_synth_wrap"' >> $(PRJ_DIR)/create_prj.tcl
 	@echo 'prj_save' >> $(PRJ_DIR)/create_prj.tcl
 	@echo 'prj_close' >> $(PRJ_DIR)/create_prj.tcl
 	cd $(PRJ_DIR) && $(PNMAINC) create_prj.tcl
