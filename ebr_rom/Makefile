@@ -209,7 +209,7 @@ endif
 endif
 
 # Override clean to also remove results/ and QuestaSim runtime artifacts
-clean::
+clean:: clean_prj
 	rm -rf $(RESULTS_DIR)
 	rm -rf qrun.out
 	rm -rf sim_build
@@ -306,6 +306,19 @@ drc:
 	@echo " G11: DRC and Parameter Validation"
 	@echo "================================================================"
 	@IP_ROOT=$(CURDIR) python3 $(CURDIR)/../scripts/run_tc.py DRC
+
+# ── test — run all groups G1..G11 and write a summary ────────────────────────
+# Continues through failures so every group is attempted regardless.
+# Writes results/summary.md at the end.
+#   make test
+.PHONY: test
+test: | $(RESULTS_DIR)
+	@for g in 1 2 3 4 5 6 7 8 9 10 11; do \
+	    IP_ROOT=$(CURDIR) python3 $(CURDIR)/../scripts/run_tc.py G$$g || true; \
+	done
+	@python3 $(CURDIR)/../scripts/summarize.py $(RESULTS_DIR)/summary.md
+	@echo ""
+	@echo "Summary written to $(RESULTS_DIR)/summary.md"
 
 # ── TC / TG named targets ─────────────────────────────────────────────────────
 # Run one test case:        make tc-rom-001  or  make tc-001
