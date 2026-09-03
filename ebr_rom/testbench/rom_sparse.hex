@@ -1,0 +1,15 @@
+// Line comment at start
+/* Block comment on single line */
+/* Multi-line
+   block
+   comment */
+@100
+12345 // word at 0x100
+23456 // word at 0x101
+@010
+0abcd // word at 0x010
+0bcde // word at 0x011
+@3FF
+03333 // word at 1023 (0x3FF)
+04444 // surplus word at 1024
+05555 // surplus word at 1025
