@@ -57,19 +57,18 @@ Each IP directory follows the same layout:
 
 | IP | RTL Module | Test Plan | Status |
 |---|---|---|---|
-| `ebr_rom` | `lscc_rom` | `docs/ROM_TestPlan_LIFCL.md` | Complete — G1 through G11 (34 TCs + 20 DRC rules + Radiant PAR) |
-| `fifo_dc` | `lscc_fifo_dc` | `docs/FIFO_DC_LIFCL_TestPlan_20260801.md` | Complete — Testbench, DRC suite & Makefile |
-| `pll` | `lscc_pll` | `docs/pll_lifcl_testplan.md` | Complete — Testbench, DRC suite & Makefile |
+| `ebr_rom` | `lscc_rom` | `docs/ROM_TestPlan_LIFCL.md` | Complete — G01 through G11 (34 TCs + 20 DRC rules + Radiant PAR) |
+| `fifo_dc` | `lscc_fifo_dc` | `docs/FIFO_DC_TestPlan_LIFCL.md` | Complete — G01 through G24 (53 TCs + 8 DRC rules + Radiant PAR) |
+| `pll` | `lscc_pll` | `docs/PLL_TestPlan_LIFCL.md` | Complete — G01 through G29 (81 TCs + 5 DRC rules + Radiant PAR) |
 
-`ebr_rom` is the reference implementation. When adding a new IP, use its Makefile,
-testbench, and `src/` structure as the starting point.
+All IP cores implement the standardized structure: CoCoTB testbench, pytest DRC suite, synthesizable Radiant wrapper, and automated Radiant compilation flow.
 
 ---
 
 ## Prerequisites
 
 - **Lattice Radiant** with QuestaSim OEM (tested against 2026.1+)
-- **Python 3.8+** with `cocotb` and `pytest` installed
+- **Python 3.8+** with dependencies installed: `pip install -r requirements.txt` (`cocotb`, `pytest`)
 - License servers accessible, or configured locally via `env.mk`
 
 ### Environment Configuration
@@ -196,34 +195,135 @@ Labels are recorded in `results/failure_log.md`.
 
 ---
 
-### fifo_dc
+### fifo_dc Makefile Target Reference
 
 ```bash
 cd fifo_dc/
 
-make tc-003            # Hard-IP controller, minimal simulation
-make tc-004            # Fabric/EBR controller, minimal simulation
-make tc-005            # Data integrity: Hard-IP fill/drain cycle
-make tc-006            # Data integrity: Fabric/EBR fill/drain cycle
-make tc-010            # FWFT mode
-make drc               # DRC parameter checks (pytest)
-make TESTCASE=tc_007_write_to_full_suppression
+# Overview & Regression
+make info              # Quick test plan outline (53 TCs, 24 testgroups)
+make test              # Run full suite (Sim G01-G23 + DRC G24 + Radiant PAR)
+make summary           # Print pass/fail summary table
+make drc               # Run G24 DRC pytest suite (src/test_drc.py)
+
+# Individual Test Cases & Test Groups
+make tc-fifodc-001     # Run TC-FIFODC-001 (baseline 512x36 EBR reg async)
+make tc-fifodc-016     # Run TC-FIFODC-016 (output register disabled)
+make tg-01             # Run all testcases in Group 1
+make g1                # Short alias for make tg-01
+
+# Radiant Project & Synthesis
+make prj_create        # Generate Radiant project (proj/lscc_fifo_dc.rdf)
+make prj_compile       # Run Synplify synthesis and PAR on proj/lscc_fifo_dc.rdf
+make clean_prj         # Remove proj/ directory and Radiant temporary logs
+make clean             # Clean all sim_build/, results/, and project artifacts
 ```
 
 ---
 
-### pll
+### pll Makefile Target Reference
 
 ```bash
 cd pll/
 
-make tc-002            # Integer-N synthesis, CLKOP lock
-make tc-004            # Fractional-N synthesis
-make tc-017            # LMMI slave read/write
-make tc-018            # APB slave dword mapping
-make drc               # DRC parameter checks (pytest)
-make TESTCASE=tc_lifcl_003_integer_n_all_6_clocks
+# Overview & Regression
+make info              # Quick test plan outline (81 TCs, 29 testgroups)
+make test              # Run full suite (Sim G01-G28 + DRC G29 + Radiant PAR)
+make summary           # Print pass/fail summary table
+make drc               # Run G29 DRC pytest suite (src/test_drc.py)
+
+# Individual Test Cases & Test Groups
+make tc-pll-001        # Run TC-PLL-001 (default config lock)
+make tc-pll-002        # Run TC-PLL-002 (integer-N all clocks)
+make tg-01             # Run all testcases in Group 1
+make g1                # Short alias for make tg-01
+
+# Radiant Project & Synthesis
+make prj_create        # Generate Radiant project (proj/lscc_pll.rdf)
+make prj_compile       # Run Synplify synthesis and PAR on proj/lscc_pll.rdf
+make clean_prj         # Remove proj/ directory and Radiant temporary logs
+make clean             # Clean all sim_build/, results/, and project artifacts
 ```
+
+---
+
+## Known Issues
+
+### FIFO DC IP (`lscc_fifo_dc`)
+
+During full test regression of `fifo_dc` against `docs/FIFO_DC_TestPlan_LIFCL.md`, 33 functional test cases fail due to two specific hardware pipeline/handshake defects in the IP core RTL (`rtl/lscc_fifo_dc.v`) when output register mode is enabled (`REGMODE="reg"`). In accordance with verification guidelines, the IP core RTL is kept unmodified, and the test suite preserves the test plan specification.
+
+#### 1. Failure Breakdown by Root Cause
+
+| Category | Failing Test Cases | Underlying RTL Defect |
+|---|---|---|
+| **Standard FIFO Mode (`FWFT=0`, `REGMODE="reg"`)** | **30 tests**:<br>• `TC-FIFODC-001` through `009`<br>• `TC-FIFODC-017` through `035`<br>• `TC-FIFODC-039`, `040` | **Premature `empty_r` gating on EBR chip-select**: In `lscc_fifo_dc.v`, `empty_r` asserts 1 cycle too early during a burst read drain, deasserting `rd_fifo_en_w` (`CSR=3'b000` to `PDP16K`) on the final word. The output register latches stale data, leaving `rd_data_o` frozen on the second-to-last word. |
+| **First-Word Fall-Through Mode (`FWFT=1`, `REGMODE="reg"`)** | **3 tests**:<br>• `TC-FIFODC-013`<br>• `TC-FIFODC-037`<br>• `TC-FIFODC-038` | **Premature prefetch latch in FWFT fabric wrapper**: In `lscc_fifo_dc_fwft_fabric.v`, `re_r` pulses for only 1 cycle immediately when `empty_i` deasserts. Because registered memory output has multi-cycle read latency, `data_q` samples uninitialized `0x0` and locks `rd_data_o` at `0x0`. |
+
+All configurations without the registered output path (**`REGMODE="noreg"`**, **Hardened Controller `HARD_IP`**, **`FWFT=1` with `REGMODE="noreg"`**, and all **G24 DRC parameter checks**) pass cleanly (26/59 suites/stages pass).
+
+---
+
+#### 2. Detailed RTL Root Cause Analysis
+
+##### Defect A: Standard FIFO Mode (`FWFT=0`, `REGMODE="reg"`)
+
+In `fifo_dc/rtl/lscc_fifo_dc.v`:
+```verilog
+// 1. Read enable is gated by empty_r
+wire rd_fifo_en_w = rd_en_i & ~empty_r;
+
+// 2. empty_cmp_w compares rd_addr_nxt_c with wr_addr
+wire empty_cmp_w = (wr_cmp_rd_w == rd_cmp_rd_w);
+
+// 3. Memory chip-select is directly driven by rd_fifo_en_w
+wire [2:0] CSR = {t_rd_en_i, t_rd_en_i, t_rd_en_i}; // where t_rd_en_i = rd_fifo_en_w
+```
+
+**Cycle-by-Cycle Execution Trace (e.g. 32-word burst in `TC-FIFODC-001`)**:
+1. Words 0 through 30 are read successfully.
+2. During the read of Word 30 (read address 30), `rd_addr_nxt_c` advances to `31 + 1 = 32`.
+3. Because 32 words were written (`wr_addr = 32`), `empty_cmp_w` evaluates to `(32 == 32) = 1`.
+4. At the next `rd_clk_i` rising edge, `empty_r` asserts to `1`.
+5. On the final read cycle (intended for Word 31 at address 31):
+   - `rd_fifo_en_w = rd_en_i & ~empty_r` evaluates to `1 & ~1 = 0`.
+   - The `PDP16K` EBR memory primitive receives `CSR = 3'b000` (chip-disabled).
+   - Address 31 is never read from memory.
+   - The output register `rd_data_ebr_r` latches the stale primitive output (Word 30), causing:
+     ```text
+     AssertionError: [TC-FIFODC-001] Word 31 mismatch: got=0x25A58 (Word 30) exp=0x26B69 (Word 31)
+     ```
+
+##### Defect B: FWFT Mode with Output Register (`FWFT=1`, `REGMODE="reg"`)
+
+In `fifo_dc/rtl/lscc_fifo_dc_fwft_fabric.v`:
+```verilog
+assign rden_o = ((empty_q_r & ~empty_lat_r) | rd_en_i) & ~empty_i;
+
+always @(posedge clk_i, posedge rst_i)
+    if (rst_i)
+        re_r <= 1'b0;
+    else if (rden_o & ~empty_i)
+        re_r <= 1'b1;
+    else
+        re_r <= 1'b0;
+
+always @(posedge clk_i, posedge rst_i)
+    if (rst_i)
+        data_q <= {DWID{1'b0}};
+    else if (re_r)
+        data_q <= data_q_w;  // data_q_w = (re_r) ? d_i : data_r;
+```
+
+**Cycle-by-Cycle Execution Trace**:
+1. When writes complete and CDC synchronization finishes, `empty_i` drops to `0`.
+2. `rden_o` pulses `1` for one cycle, asserting `re_r <= 1`.
+3. On the next clock cycle, `data_q` samples `d_i`. However, because the underlying EBR memory has registered output latency, `d_i` is still uninitialized (`0x0`).
+4. On the subsequent cycle, `re_r` drops back to `0`. Because `data_q` is only updated when `re_r == 1`, `data_q` remains frozen at `0x0`.
+5. When the testbench samples `rd_data_o`, it reads `0x0`:
+   ```text
+   AssertionError: [TC-FIFODC-013] Word 0 mismatch: got=0x0 exp=0x5A5A
+   ```
 
 ---
 
