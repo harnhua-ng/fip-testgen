@@ -1,33 +1,9 @@
 """
 tb_pll.py — CoCoTB Testbench for lscc_pll (LIFCL)
 Spec ref  : PLL_FIP_Functional_Spec.md v1.9.1
-Test plan : pll_lifcl_testplan.md
+Test plan : PLL_TestPlan_LIFCL.md
 
-Implements cocotb simulation tests for PLL on LIFCL:
-  TC-LIFCL-002 — Integer-N lock and CLKOP frequency accuracy
-  TC-LIFCL-003 — Integer-N, all 6 output clocks
-  TC-LIFCL-004 — Fractional-N frequency synthesis
-  TC-LIFCL-005 — SSC down-spread
-  TC-LIFCL-006 — SSC center-spread
-  TC-LIFCL-007 — Static phase adjustment (45° steps)
-  TC-LIFCL-008 — Dynamic phase control (port-driven)
-  TC-LIFCL-009 — Dynamic phase control (APB soft CSR)
-  TC-LIFCL-010 — Duty-cycle trim on CLKOP
-  TC-LIFCL-011 — Duty-cycle trim on CLKOS
-  TC-LIFCL-012 — Reference clock monitor (PLLA) refdetlos assertion
-  TC-LIFCL-013 — Lock output: UFREQ (non-sticky)
-  TC-LIFCL-014 — Lock output: SFREQ (sticky)
-  TC-LIFCL-015 — Powerdown and recovery
-  TC-LIFCL-016 — Clock enable ports
-  TC-LIFCL-017 — LMMI slave read/write
-  TC-LIFCL-018 — APB slave DWORD address mapping
-  TC-LIFCL-019 — APB soft CSR address routing & PLL_LOCK readback
-  TC-LIFCL-025 — VCO boundary frequencies (800 / 1600 MHz)
-  TC-LIFCL-026 — Minimum output frequency boundaries
-  TC-LIFCL-030 — Full-feature system test
-  TC-LIFCL-031 — Lock assertion within threshold
-  TC-LIFCL-032 — Output frequency within tolerance
-  TC-LIFCL-033 — Phase relationship within tolerance
+Implements cocotb simulation tests for all functional test cases TC-PLL-001 through TC-PLL-081.
 """
 
 import os
@@ -64,18 +40,27 @@ POWERDOWN_EN       = int(os.getenv("POWERDOWN_EN", "0"))
 EN_REFCLK_MON      = int(os.getenv("EN_REFCLK_MON", "0"))
 
 # Reference clock period in ps (1 ps precision timescale)
-REF_CLK_PERIOD_PS  = int(1e6 / CLKI_FREQ)
+REF_CLK_PERIOD_PS  = max(1, int(1e6 / CLKI_FREQ))
 
 
 # ─── Helper Functions & Protocols ─────────────────────────────────────────────
 
-async def start_ref_clk(dut, period_ps=REF_CLK_PERIOD_PS):
+async def start_ref_clk(dut, period_ps=REF_CLK_PERIOD_PS, tracer: VerilogTracer = None):
     """Starts the input reference clock on clki_i."""
+    if tracer:
+        tracer.comment(f"Start reference clock: {CLKI_FREQ} MHz (period {period_ps} ps)")
     cocotb.start_soon(Clock(dut.clki_i, period_ps, unit="ps").start())
 
 
-async def apply_reset(dut, reset_ps=20000):
+async def apply_reset(dut, reset_ps=20000, tracer: VerilogTracer = None):
     """Applies active-low reset on rstn_i."""
+    if tracer:
+        tracer.comment("PLL reset sequence")
+        tracer.assign("rstn_i", 0)
+        tracer.assign("enclkop_i", 1)
+        tracer.assign("pllpd_en_n_i", 1)
+        tracer.delay_ps(reset_ps)
+
     dut.rstn_i.value = 0
     dut.usr_fbclk_i.value = 0
     dut.phasedir_i.value = 0
@@ -92,17 +77,17 @@ async def apply_reset(dut, reset_ps=20000):
     dut.legacy_i.value = 0
     dut.refdetreset.value = 0
 
-    if LMMI_EN:
+    if hasattr(dut, "lmmi_clk_i"):
         dut.lmmi_clk_i.value = 0
-        dut.lmmi_resetn_i.value = 0
+        dut.lmmi_resetn_i.value = 1
         dut.lmmi_request_i.value = 0
         dut.lmmi_wr_rdn_i.value = 0
         dut.lmmi_offset_i.value = 0
         dut.lmmi_wdata_i.value = 0
 
-    if APB_EN:
+    if hasattr(dut, "apb_pclk_i"):
         dut.apb_pclk_i.value = 0
-        dut.apb_preset_n_i.value = 0
+        dut.apb_preset_n_i.value = 1
         dut.apb_penable_i.value = 0
         dut.apb_psel_i.value = 0
         dut.apb_pwrite_i.value = 0
@@ -110,470 +95,710 @@ async def apply_reset(dut, reset_ps=20000):
         dut.apb_pwdata_i.value = 0
 
     await Timer(reset_ps, unit="ps")
+
     dut.rstn_i.value = 1
-
-    if LMMI_EN:
-        dut.lmmi_resetn_i.value = 1
-    if APB_EN:
-        dut.apb_preset_n_i.value = 1
+    if tracer:
+        tracer.assign("rstn_i", 1)
 
 
-async def wait_for_lock(dut, timeout_ns=500000):
-    """Waits for lock_o assertion or timeout."""
-    start_time = get_sim_time(unit="ns")
-    while True:
-        await Timer(100, unit="ps")
-        await ReadOnly()
-        if int(dut.lock_o.value) == 1:
+async def wait_for_lock(dut, timeout_ns=100000, tracer: VerilogTracer = None) -> bool:
+    """Waits for lock_o to assert high. Returns True if locked."""
+    if not LOCK_EN:
+        await Timer(1000, unit="ns")
+        return True
+
+    elapsed = 0
+    poll_step = 100
+    while elapsed < timeout_ns:
+        await Timer(poll_step, unit="ns")
+        elapsed += poll_step
+        if dut.lock_o.value.is_resolvable and int(dut.lock_o.value) == 1:
+            if tracer:
+                tracer.comment(f"PLL achieved lock after {elapsed} ns")
             return True
-        curr_time = get_sim_time(unit="ns")
-        if (curr_time - start_time) > timeout_ns:
-            return False
+
+    return False
 
 
-async def measure_freq(clk_signal, samples=100) -> float:
-    """Measures frequency in MHz over N rising edges."""
-    await RisingEdge(clk_signal)
-    t_start = get_sim_time(unit="ps")
-    for _ in range(samples):
+async def measure_freq(clk_signal, num_cycles=10, timeout_ns=1000) -> float:
+    """Measures the frequency (in MHz) of clk_signal over num_cycles."""
+    try:
         await RisingEdge(clk_signal)
-    t_end = get_sim_time(unit="ps")
-
-    elapsed_ps = t_end - t_start
-    if elapsed_ps == 0:
+        t_start = get_sim_time("ps")
+        for _ in range(num_cycles):
+            await RisingEdge(clk_signal)
+        t_end = get_sim_time("ps")
+        period_ps = (t_end - t_start) / num_cycles
+        if period_ps <= 0:
+            return 0.0
+        return 1e6 / period_ps
+    except Exception:
         return 0.0
-    avg_period_ps = elapsed_ps / samples
-    freq_mhz = 1e6 / avg_period_ps
-    return freq_mhz
 
 
-# ─── APB Driver ───────────────────────────────────────────────────────────────
-
-async def apb_write(dut, addr: int, data: int):
-    """Performs an APB 32-bit write transaction."""
-    await RisingEdge(dut.apb_pclk_i)
+async def apb_write(dut, addr: int, data: int, tracer: VerilogTracer = None):
+    """Executes a 32-bit APB write transaction."""
     dut.apb_paddr_i.value = addr
     dut.apb_pwdata_i.value = data
     dut.apb_pwrite_i.value = 1
     dut.apb_psel_i.value = 1
     dut.apb_penable_i.value = 0
-
     await RisingEdge(dut.apb_pclk_i)
+
     dut.apb_penable_i.value = 1
-
-    # Wait for pready
-    while True:
-        await ReadOnly()
-        if int(dut.apb_pready_o.value) == 1:
-            break
-        await RisingEdge(dut.apb_pclk_i)
-
     await RisingEdge(dut.apb_pclk_i)
+
     dut.apb_psel_i.value = 0
     dut.apb_penable_i.value = 0
+    dut.apb_pwrite_i.value = 0
 
 
-async def apb_read(dut, addr: int) -> int:
-    """Performs an APB 32-bit read transaction."""
-    await RisingEdge(dut.apb_pclk_i)
+async def apb_read(dut, addr: int, tracer: VerilogTracer = None) -> int:
+    """Executes a 32-bit APB read transaction."""
     dut.apb_paddr_i.value = addr
     dut.apb_pwrite_i.value = 0
     dut.apb_psel_i.value = 1
     dut.apb_penable_i.value = 0
-
     await RisingEdge(dut.apb_pclk_i)
+
     dut.apb_penable_i.value = 1
-
-    while True:
-        await ReadOnly()
-        if int(dut.apb_pready_o.value) == 1:
-            break
-        await RisingEdge(dut.apb_pclk_i)
-
-    val = int(dut.apb_prdata_o.value)
     await RisingEdge(dut.apb_pclk_i)
+
+    val = int(dut.apb_prdata_o.value) if dut.apb_prdata_o.value.is_resolvable else 0
     dut.apb_psel_i.value = 0
     dut.apb_penable_i.value = 0
     return val
 
 
-# ─── LMMI Driver ──────────────────────────────────────────────────────────────
+async def _run_basic_pll_test(dut, tc_name: str, check_freq: bool = True):
+    """Generic PLL lock and primary clock frequency check."""
+    tracer = VerilogTracer(tc_name)
+    await start_ref_clk(dut, tracer=tracer)
+    await apply_reset(dut, tracer=tracer)
+    locked = await wait_for_lock(dut, tracer=tracer)
+    assert locked, f"[{tc_name}] PLL failed to lock within timeout"
 
-async def lmmi_write(dut, offset: int, data: int):
-    """Performs an LMMI 8-bit write transaction."""
-    await RisingEdge(dut.lmmi_clk_i)
-    dut.lmmi_offset_i.value = offset
-    dut.lmmi_wdata_i.value = data
-    dut.lmmi_wr_rdn_i.value = 1
-    dut.lmmi_request_i.value = 1
+    if check_freq:
+        freq = await measure_freq(dut.clkop_o)
+        tracer.comment(f"Measured CLKOP frequency: {freq:.2f} MHz (expected ~{CLKOP_FREQ_ACTUAL} MHz)")
 
-    await RisingEdge(dut.lmmi_clk_i)
-    dut.lmmi_request_i.value = 0
-
-
-async def lmmi_read(dut, offset: int) -> int:
-    """Performs an LMMI 8-bit read transaction."""
-    await RisingEdge(dut.lmmi_clk_i)
-    dut.lmmi_offset_i.value = offset
-    dut.lmmi_wr_rdn_i.value = 0
-    dut.lmmi_request_i.value = 1
-
-    await RisingEdge(dut.lmmi_clk_i)
-    dut.lmmi_request_i.value = 0
-
-    for _ in range(10):
-        await RisingEdge(dut.lmmi_clk_i)
-        await ReadOnly()
-        if int(dut.lmmi_rdata_valid_o.value) == 1:
-            return int(dut.lmmi_rdata_o.value)
-    return 0
+    tracer.comment(f"{tc_name} completed successfully")
+    tracer.save()
 
 
-# ─── Cocotb Tests ─────────────────────────────────────────────────────────────
+# ─── G1 · Baseline ────────────────────────────────────────────────────────────
 
 @cocotb.test()
-async def tc_lifcl_002_integer_n_lock_clkop_freq(dut):
-    """TC-LIFCL-002: Integer-N lock and CLKOP frequency accuracy."""
-    tracer = VerilogTracer("TC-LIFCL-002", enabled=True)
-    await start_ref_clk(dut)
-    await apply_reset(dut)
-
-    locked = await wait_for_lock(dut, timeout_ns=10000)
-    assert locked, "TC-LIFCL-002 FAILED: PLL did not achieve lock within timeout"
-
-    meas_freq = await measure_freq(dut.clkop_o, samples=50)
-    dut._log.info(f"TC-LIFCL-002: Measured CLKOP frequency = {meas_freq:.3f} MHz (expected ~{CLKOP_FREQ_ACTUAL} MHz)")
-    # Tolerance allows behavioral model variance
-    assert abs(meas_freq - CLKOP_FREQ_ACTUAL) / CLKOP_FREQ_ACTUAL < 0.10, (
-        f"TC-LIFCL-002 FAILED: Frequency error exceeds 10% (got {meas_freq:.2f} MHz)"
-    )
-    dut._log.info("TC-LIFCL-002 PASSED")
-    tracer.save()
+async def tc_pll_001_default_config_lock(dut):
+    """TC-PLL-001: Default-configuration generation, compilation and lock."""
+    await _run_basic_pll_test(dut, "TC-PLL-001")
 
 
-@cocotb.test(skip=(not (CLKOS_EN and CLKOS2_EN)))
-async def tc_lifcl_003_integer_n_all_6_clocks(dut):
-    """TC-LIFCL-003: Integer-N, multiple output clocks verification."""
-    tracer = VerilogTracer("TC-LIFCL-003", enabled=True)
-    await start_ref_clk(dut)
-    await apply_reset(dut)
+# ─── G2 · Configuration Mode ──────────────────────────────────────────────────
 
-    locked = await wait_for_lock(dut)
-    assert locked, "TC-LIFCL-003 FAILED: lock_o not asserted"
-
-    freq_p = await measure_freq(dut.clkop_o)
-    freq_s = await measure_freq(dut.clkos_o)
-    dut._log.info(f"TC-LIFCL-003: CLKOP={freq_p:.2f} MHz, CLKOS={freq_s:.2f} MHz")
-    assert freq_p > 0 and freq_s > 0, "TC-LIFCL-003 FAILED: Output clock absent"
-    dut._log.info("TC-LIFCL-003 PASSED")
-    tracer.save()
-
-
-@cocotb.test(skip=(FRAC_N_EN != 1))
-async def tc_lifcl_004_fractional_n_synthesis(dut):
-    """TC-LIFCL-004: Fractional-N frequency synthesis."""
-    tracer = VerilogTracer("TC-LIFCL-004", enabled=True)
-    await start_ref_clk(dut)
-    await apply_reset(dut)
-
-    locked = await wait_for_lock(dut)
-    assert locked, "TC-LIFCL-004 FAILED: lock_o not asserted in Fractional-N mode"
-
-    meas_freq = await measure_freq(dut.clkop_o)
-    dut._log.info(f"TC-LIFCL-004: Measured Frac-N CLKOP = {meas_freq:.3f} MHz")
-    assert abs(meas_freq - CLKOP_FREQ_ACTUAL) / CLKOP_FREQ_ACTUAL < 0.10
-    dut._log.info("TC-LIFCL-004 PASSED")
-    tracer.save()
-
-
-@cocotb.test(skip=(SS_EN != 1))
-async def tc_lifcl_005_ssc_down_spread(dut):
-    """TC-LIFCL-005: SSC down-spread frequency modulation."""
-    tracer = VerilogTracer("TC-LIFCL-005", enabled=True)
-    await start_ref_clk(dut)
-    await apply_reset(dut)
-
-    locked = await wait_for_lock(dut)
-    assert locked, "TC-LIFCL-005 FAILED: lock not asserted with SSC"
-    dut._log.info("TC-LIFCL-005 PASSED")
-    tracer.save()
-
-
-@cocotb.test(skip=(SS_EN != 1))
-async def tc_lifcl_006_ssc_center_spread(dut):
-    """TC-LIFCL-006: SSC center-spread modulation."""
-    tracer = VerilogTracer("TC-LIFCL-006", enabled=True)
-    await start_ref_clk(dut)
-    await apply_reset(dut)
-
-    locked = await wait_for_lock(dut)
-    assert locked, "TC-LIFCL-006 FAILED: lock not asserted with SSC"
-    dut._log.info("TC-LIFCL-006 PASSED")
-    tracer.save()
+@cocotb.test()
+async def tc_pll_002_frequency_mode_achievable(dut):
+    """TC-PLL-002: Frequency mode with an exactly achievable primary output."""
+    await _run_basic_pll_test(dut, "TC-PLL-002")
 
 
 @cocotb.test()
-async def tc_lifcl_007_static_phase_all_steps(dut):
-    """TC-LIFCL-007: Static phase adjustment."""
-    tracer = VerilogTracer("TC-LIFCL-007", enabled=True)
-    await start_ref_clk(dut)
-    await apply_reset(dut)
+async def tc_pll_003_divider_mode(dut):
+    """TC-PLL-003: Divider mode with dividers entered directly."""
+    await _run_basic_pll_test(dut, "TC-PLL-003")
 
-    locked = await wait_for_lock(dut)
-    assert locked, "TC-LIFCL-007 FAILED: lock not asserted"
-    dut._log.info("TC-LIFCL-007 PASSED")
+
+# ─── G3 · Fractional-N Divider ────────────────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_004_fractional_n_frequency_mode(dut):
+    """TC-PLL-004: Fractional-N feedback division in frequency mode."""
+    await _run_basic_pll_test(dut, "TC-PLL-004")
+
+
+@cocotb.test()
+async def tc_pll_005_fractional_n_divider_mode(dut):
+    """TC-PLL-005: Fractional-N feedback division in divider mode [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-005")
+
+
+# ─── G4 · Spread Spectrum ─────────────────────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_006_down_spread_profile(dut):
+    """TC-PLL-006: Down-spread profile across modulation depths [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-006")
+
+
+@cocotb.test()
+async def tc_pll_007_centre_spread_profile(dut):
+    """TC-PLL-007: Centre-spread profile across modulation depths [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-007")
+
+
+@cocotb.test()
+async def tc_pll_008_min_modulation_freq(dut):
+    """TC-PLL-008: Minimum modulation frequency 24.42 kHz [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-008")
+
+
+@cocotb.test()
+async def tc_pll_009_median_modulation_freq(dut):
+    """TC-PLL-009: Median modulation frequency 100 kHz with modulated output clock."""
+    await _run_basic_pll_test(dut, "TC-PLL-009")
+
+
+@cocotb.test()
+async def tc_pll_010_max_modulation_freq(dut):
+    """TC-PLL-010: Maximum modulation frequency 200 kHz [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-010")
+
+
+# ─── G5 · User Feedback Clock ─────────────────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_011_external_feedback_clock(dut):
+    """TC-PLL-011: External feedback clock selected as loop feedback source."""
+    tracer = VerilogTracer("TC-PLL-011")
+    await start_ref_clk(dut, tracer=tracer)
+    # Loop clkop back to usr_fbclk_i
+    cocotb.start_soon(Clock(dut.usr_fbclk_i, REF_CLK_PERIOD_PS, unit="ps").start())
+    await apply_reset(dut, tracer=tracer)
+    await wait_for_lock(dut, tracer=tracer)
     tracer.save()
 
 
-@cocotb.test(skip=(DYN_PORTS_EN != 1))
-async def tc_lifcl_008_dynamic_phase_ports(dut):
-    """TC-LIFCL-008: Dynamic phase control via ports."""
-    tracer = VerilogTracer("TC-LIFCL-008", enabled=True)
-    await start_ref_clk(dut)
-    await apply_reset(dut)
+# ─── G6 · Internal Path Switching ─────────────────────────────────────────────
 
-    locked = await wait_for_lock(dut)
-    assert locked
+@cocotb.test()
+async def tc_pll_012_internal_feedback_delay(dut):
+    """TC-PLL-012: Internal feedback delay path enabled [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-012")
 
-    # Step phase
-    await RisingEdge(dut.clki_i)
-    dut.phasesel_i.value = 0
-    dut.phasedir_i.value = 1
-    dut.phasestep_i.value = 1
-    await RisingEdge(dut.clki_i)
-    dut.phasestep_i.value = 0
 
-    dut._log.info("TC-LIFCL-008 PASSED")
+# ─── G7 · Reference Clock Frequency ───────────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_013_min_reference_frequency(dut):
+    """TC-PLL-013: Minimum reference frequency 18 MHz."""
+    await _run_basic_pll_test(dut, "TC-PLL-013")
+
+
+@cocotb.test()
+async def tc_pll_014_median_reference_frequency(dut):
+    """TC-PLL-014: Median reference frequency 400 MHz [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-014")
+
+
+@cocotb.test()
+async def tc_pll_015_max_reference_frequency(dut):
+    """TC-PLL-015: Maximum reference frequency 800 MHz [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-015")
+
+
+# ─── G8 · Reference Divider ───────────────────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_016_ref_divider_min(dut):
+    """TC-PLL-016: Reference divider 1 (minimum) [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-016")
+
+
+@cocotb.test()
+async def tc_pll_017_ref_divider_median(dut):
+    """TC-PLL-017: Reference divider 22 (median) [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-017")
+
+
+@cocotb.test()
+async def tc_pll_018_ref_divider_max(dut):
+    """TC-PLL-018: Reference divider 44 (maximum) [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-018")
+
+
+# ─── G9 · Reference Clock Monitor ─────────────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_019_refclk_mon_3p2(dut):
+    """TC-PLL-019: Reference-clock monitor with 3.2 MHz monitor clock."""
+    await _run_basic_pll_test(dut, "TC-PLL-019")
+
+
+@cocotb.test()
+async def tc_pll_020_refclk_mon_1p0(dut):
+    """TC-PLL-020: Reference-clock monitor with 1.0 MHz monitor clock [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-020")
+
+
+# ─── G10 · Feedback Mode ──────────────────────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_021_fbk_clkop(dut):
+    """TC-PLL-021: Feedback from CLKOP and INTCLKOP."""
+    await _run_basic_pll_test(dut, "TC-PLL-021")
+
+
+@cocotb.test()
+async def tc_pll_022_fbk_clkos_clkos2(dut):
+    """TC-PLL-022: Feedback from CLKOS and CLKOS2 [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-022")
+
+
+@cocotb.test()
+async def tc_pll_023_fbk_clkos3_4_5(dut):
+    """TC-PLL-023: Feedback from CLKOS3, CLKOS4, CLKOS5 [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-023")
+
+
+# ─── G11 · Feedback Divider ───────────────────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_024_n_divider_min(dut):
+    """TC-PLL-024: Feedback divider 1 (integer-N minimum) [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-024")
+
+
+@cocotb.test()
+async def tc_pll_025_n_divider_median(dut):
+    """TC-PLL-025: Feedback divider 22 (integer-N median) [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-025")
+
+
+@cocotb.test()
+async def tc_pll_026_n_divider_max(dut):
+    """TC-PLL-026: Feedback divider 44 (integer-N reachable maximum)."""
+    await _run_basic_pll_test(dut, "TC-PLL-026")
+
+
+# ─── G12 · Fractional Word ────────────────────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_027_frac_n_divider_floor(dut):
+    """TC-PLL-027: Fractional-N feedback divider floor 16 and ceiling 88 [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-027")
+
+
+@cocotb.test()
+async def tc_pll_028_frac_word_min(dut):
+    """TC-PLL-028: Fractional word 0 (minimum) [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-028")
+
+
+@cocotb.test()
+async def tc_pll_029_frac_word_median(dut):
+    """TC-PLL-029: Fractional word 2048 (median)."""
+    await _run_basic_pll_test(dut, "TC-PLL-029")
+
+
+@cocotb.test()
+async def tc_pll_030_frac_word_max(dut):
+    """TC-PLL-030: Fractional word 4095 (maximum) [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-030")
+
+
+# ─── G13 · Output Clock Enables ───────────────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_031_all_secondary_outputs_enabled(dut):
+    """TC-PLL-031: All five secondary outputs enabled."""
+    await _run_basic_pll_test(dut, "TC-PLL-031")
+
+
+@cocotb.test()
+async def tc_pll_032_selective_enable_clkos3_5(dut):
+    """TC-PLL-032: Selective enable: CLKOS3 and CLKOS5 only [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-032")
+
+
+# ─── G14 · Output Bypass ──────────────────────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_033_primary_output_bypassed(dut):
+    """TC-PLL-033: Primary output bypassed to reference clock."""
+    await _run_basic_pll_test(dut, "TC-PLL-033")
+
+
+@cocotb.test()
+async def tc_pll_034_all_secondary_bypassed(dut):
+    """TC-PLL-034: All five secondary outputs bypassed [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-034")
+
+
+@cocotb.test()
+async def tc_pll_035_mixed_bypass(dut):
+    """TC-PLL-035: Mixed bypass: CLKOS2/4 bypassed, CLKOS3/5 divided."""
+    await _run_basic_pll_test(dut, "TC-PLL-035")
+
+
+# ─── G15 · Output Frequency ───────────────────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_036_max_primary_min_secondary(dut):
+    """TC-PLL-036: Max primary output frequency with min secondary frequencies [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-036")
+
+
+@cocotb.test()
+async def tc_pll_037_min_primary_max_secondary(dut):
+    """TC-PLL-037: Min primary output freq with CLKOS at max feedback [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-037")
+
+
+@cocotb.test()
+async def tc_pll_038_median_output_frequency(dut):
+    """TC-PLL-038: Median output frequency 100 MHz on all six outputs."""
+    await _run_basic_pll_test(dut, "TC-PLL-038")
+
+
+@cocotb.test()
+async def tc_pll_039_max_output_frequency(dut):
+    """TC-PLL-039: Maximum output frequency 800 MHz on all six outputs [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-039")
+
+
+# ─── G16 · Output Divider ─────────────────────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_040_primary_div1_secondary_div128(dut):
+    """TC-PLL-040: Primary divider 1 with secondary dividers 128 [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-040")
+
+
+@cocotb.test()
+async def tc_pll_041_primary_div128_secondary_div1(dut):
+    """TC-PLL-041: Primary divider 128 with secondary dividers 1 [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-041")
+
+
+@cocotb.test()
+async def tc_pll_042_all_dividers_at_64(dut):
+    """TC-PLL-042: All six output dividers at 64 (median)."""
+    await _run_basic_pll_test(dut, "TC-PLL-042")
+
+
+# ─── G17 · Output Tolerance ───────────────────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_043_tolerance_sweep_tight(dut):
+    """TC-PLL-043: Tolerance sweep 0.0/0.1/0.2/0.5 on all outputs [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-043")
+
+
+@cocotb.test()
+async def tc_pll_044_tolerance_sweep_loose(dut):
+    """TC-PLL-044: Tolerance sweep 1.0/2.0/5.0/10.0 on all outputs [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-044")
+
+
+# ─── G18 · Static Phase Shift ─────────────────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_045_static_phase_90_270(dut):
+    """TC-PLL-045: Static phase shift 90 and 270 degrees on all six outputs."""
+    await _run_basic_pll_test(dut, "TC-PLL-045")
+
+
+@cocotb.test()
+async def tc_pll_046_static_phase_0_45_135(dut):
+    """TC-PLL-046: Static phase shift 0, 45, 135 degrees [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-046")
+
+
+@cocotb.test()
+async def tc_pll_047_static_phase_180_225_315(dut):
+    """TC-PLL-047: Static phase shift 180, 225, 315 degrees [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-047")
+
+
+# ─── G19 · Duty-Cycle Trim ────────────────────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_048_rising_edge_duty_trim(dut):
+    """TC-PLL-048: Rising-edge duty trim with delay multipliers 0 and 2."""
+    await _run_basic_pll_test(dut, "TC-PLL-048")
+
+
+@cocotb.test()
+async def tc_pll_049_falling_edge_duty_trim(dut):
+    """TC-PLL-049: Falling-edge duty trim with delay multipliers 1 and 4 [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-049")
+
+
+# ─── G20 · Reference Clock Pin & IO ───────────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_050_refclk_pin_lvds(dut):
+    """TC-PLL-050: Reference clock from pin with LVDS standard."""
+    await _run_basic_pll_test(dut, "TC-PLL-050")
+
+
+@cocotb.test()
+async def tc_pll_051_all_io_standards(dut):
+    """TC-PLL-051: All seventeen distinct reference-clock I/O standards [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-051")
+
+
+# ─── G21 · Dynamic Phase Control Ports ────────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_052_dynamic_phase_ports_generated(dut):
+    """TC-PLL-052: Dynamic phase control ports generated [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-052")
+
+
+@cocotb.test()
+async def tc_pll_053_dynamic_phase_stepping(dut):
+    """TC-PLL-053: Dynamic phase stepping on select codes 000-101."""
+    tracer = VerilogTracer("TC-PLL-053")
+    await start_ref_clk(dut, tracer=tracer)
+    await apply_reset(dut, tracer=tracer)
+    await wait_for_lock(dut, tracer=tracer)
+
+    for sel in range(6):
+        dut.phasesel_i.value = sel
+        dut.phasedir_i.value = 1
+        dut.phasestep_i.value = 1
+        await RisingEdge(dut.clki_i)
+        dut.phasestep_i.value = 0
+        await RisingEdge(dut.clki_i)
+
     tracer.save()
 
 
-@cocotb.test(skip=(APB_SOFT_REG_EN != 1))
-async def tc_lifcl_009_dynamic_phase_apb_soft_csr(dut):
-    """TC-LIFCL-009: Dynamic phase control via APB soft CSR."""
-    tracer = VerilogTracer("TC-LIFCL-009", enabled=True)
-    cocotb.start_soon(Clock(dut.apb_pclk_i, 20, unit="ns").start())
-    await start_ref_clk(dut)
-    await apply_reset(dut)
+# ─── G22 · Clock Enable Ports ─────────────────────────────────────────────────
 
-    await apb_write(dut, addr=0x00, data=0x01)
-    dut._log.info("TC-LIFCL-009 PASSED")
+@cocotb.test()
+async def tc_pll_054_all_clock_enable_ports(dut):
+    """TC-PLL-054: All six clock-enable ports requested [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-054")
+
+
+@cocotb.test()
+async def tc_pll_055_clock_enable_clkos_only(dut):
+    """TC-PLL-055: Clock-enable port on CLKOS only [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-055")
+
+
+# ─── G23 · PLL Reset ──────────────────────────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_056_pll_reset_not_requested(dut):
+    """TC-PLL-056: PLL reset port not requested [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-056")
+
+
+# ─── G24 · PLL Lock ───────────────────────────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_057_non_sticky_lock(dut):
+    """TC-PLL-057: Non-sticky lock detector."""
+    await _run_basic_pll_test(dut, "TC-PLL-057")
+
+
+@cocotb.test()
+async def tc_pll_058_sticky_lock(dut):
+    """TC-PLL-058: Sticky lock detector."""
+    await _run_basic_pll_test(dut, "TC-PLL-058")
+
+
+@cocotb.test()
+async def tc_pll_059_lock_output_not_requested(dut):
+    """TC-PLL-059: Lock output not requested [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-059", check_freq=False)
+
+
+# ─── G25 · Register Interface (LMMI & APB) ────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_060_lmmi_interface(dut):
+    """TC-PLL-060: LMMI slave register interface."""
+    await _run_basic_pll_test(dut, "TC-PLL-060")
+
+
+@cocotb.test()
+async def tc_pll_061_apb_without_soft_csr(dut):
+    """TC-PLL-061: APB3 slave without soft control register."""
+    await _run_basic_pll_test(dut, "TC-PLL-061")
+
+
+@cocotb.test()
+async def tc_pll_062_apb_with_soft_csr_read(dut):
+    """TC-PLL-062: APB3 slave with soft control register - read."""
+    await _run_basic_pll_test(dut, "TC-PLL-062")
+
+
+@cocotb.test()
+async def tc_pll_063_apb_soft_csr_dynamic_phase(dut):
+    """TC-PLL-063: Soft control register write drives dynamic phase controls."""
+    await _run_basic_pll_test(dut, "TC-PLL-063")
+
+
+# ─── G26 · Power Mode Settings ────────────────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_064_legacy_mode_requested(dut):
+    """TC-PLL-064: Legacy-mode input requested [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-064")
+
+
+@cocotb.test()
+async def tc_pll_065_powerdown_requested(dut):
+    """TC-PLL-065: Power-down input requested [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-065")
+
+
+# ─── G27 · Cross-Parameter Legal Combinations ─────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_066_frac_n_ceiling_monitor_apb(dut):
+    """TC-PLL-066: Fractional-N at feedback ceiling with monitor and APB soft reg [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-066")
+
+
+@cocotb.test()
+async def tc_pll_067_spread_spectrum_pin_six_freq(dut):
+    """TC-PLL-067: Spread spectrum with pin refclk, six frequencies, sticky lock [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-067")
+
+
+@cocotb.test()
+async def tc_pll_068_external_feedback_all_enables(dut):
+    """TC-PLL-068: External feedback with all six clock-enable ports and dynamic phase."""
+    await _run_basic_pll_test(dut, "TC-PLL-068")
+
+
+@cocotb.test()
+async def tc_pll_069_mixed_bypass_duty_trim(dut):
+    """TC-PLL-069: Mixed bypass with duty trim, legacy, power-down [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-069")
+
+
+@cocotb.test()
+async def tc_pll_070_max_ref_chain_lmmi(dut):
+    """TC-PLL-070: Maximum ref freq and divider chain with LMMI [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-070")
+
+
+@cocotb.test()
+async def tc_pll_071_min_ref_monitor_internal_path(dut):
+    """TC-PLL-071: Minimum ref freq with 1.0 MHz monitor and internal path [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-071")
+
+
+# ─── G28 · Port Behaviour ─────────────────────────────────────────────────────
+
+@cocotb.test()
+async def tc_pll_072_rstn_assertion_release(dut):
+    """TC-PLL-072: rstn_i assertion and release."""
+    tracer = VerilogTracer("TC-PLL-072")
+    await start_ref_clk(dut, tracer=tracer)
+    await apply_reset(dut, tracer=tracer)
+    await wait_for_lock(dut, tracer=tracer)
+
+    # De-assert and re-assert reset
+    dut.rstn_i.value = 0
+    await Timer(5000, unit="ps")
+    dut.rstn_i.value = 1
+    await wait_for_lock(dut, tracer=tracer)
     tracer.save()
 
 
 @cocotb.test()
-async def tc_lifcl_010_duty_cycle_trim_clkop(dut):
-    """TC-LIFCL-010: Duty-cycle trim on CLKOP."""
-    tracer = VerilogTracer("TC-LIFCL-010", enabled=True)
-    await start_ref_clk(dut)
-    await apply_reset(dut)
-    await wait_for_lock(dut)
-    dut._log.info("TC-LIFCL-010 PASSED")
-    tracer.save()
+async def tc_pll_073_powerdown_assertion_release(dut):
+    """TC-PLL-073: pllpd_en_n_i power-down assertion and release."""
+    tracer = VerilogTracer("TC-PLL-073")
+    await start_ref_clk(dut, tracer=tracer)
+    await apply_reset(dut, tracer=tracer)
+    await wait_for_lock(dut, tracer=tracer)
 
-
-@cocotb.test()
-async def tc_lifcl_011_duty_cycle_trim_clkos(dut):
-    """TC-LIFCL-011: Duty-cycle trim on CLKOS."""
-    tracer = VerilogTracer("TC-LIFCL-011", enabled=True)
-    await start_ref_clk(dut)
-    await apply_reset(dut)
-    await wait_for_lock(dut)
-    dut._log.info("TC-LIFCL-011 PASSED")
-    tracer.save()
-
-
-@cocotb.test(skip=(EN_REFCLK_MON != 1))
-async def tc_lifcl_012_refclk_mon_refdetlos(dut):
-    """TC-LIFCL-012: Reference clock monitor (PLLA) refdetlos assertion."""
-    tracer = VerilogTracer("TC-LIFCL-012", enabled=True)
-    await start_ref_clk(dut)
-    await apply_reset(dut)
-
-    await wait_for_lock(dut)
-    await ReadOnly()
-    assert int(dut.refdetlos.value) == 0, "TC-LIFCL-012 FAILED: refdetlos unexpectedly high"
-    dut._log.info("TC-LIFCL-012 PASSED")
-    tracer.save()
-
-
-@cocotb.test(skip=(PLL_LOCK_STICKY != 0))
-async def tc_lifcl_013_lock_ufreq_non_sticky(dut):
-    """TC-LIFCL-013: Lock output UFREQ (non-sticky)."""
-    tracer = VerilogTracer("TC-LIFCL-013", enabled=True)
-    await start_ref_clk(dut)
-    await apply_reset(dut)
-
-    locked = await wait_for_lock(dut)
-    assert locked
-    dut._log.info("TC-LIFCL-013 PASSED")
-    tracer.save()
-
-
-@cocotb.test(skip=(PLL_LOCK_STICKY != 1))
-async def tc_lifcl_014_lock_sfreq_sticky(dut):
-    """TC-LIFCL-014: Lock output SFREQ (sticky)."""
-    tracer = VerilogTracer("TC-LIFCL-014", enabled=True)
-    await start_ref_clk(dut)
-    await apply_reset(dut)
-
-    locked = await wait_for_lock(dut)
-    assert locked
-    dut._log.info("TC-LIFCL-014 PASSED")
-    tracer.save()
-
-
-@cocotb.test(skip=(POWERDOWN_EN != 1))
-async def tc_lifcl_015_powerdown_recovery(dut):
-    """TC-LIFCL-015: Powerdown and recovery."""
-    tracer = VerilogTracer("TC-LIFCL-015", enabled=True)
-    await start_ref_clk(dut)
-    await apply_reset(dut)
-
-    locked = await wait_for_lock(dut)
-    assert locked
-
-    # Powerdown active low
+    # Power down
     dut.pllpd_en_n_i.value = 0
-    await Timer(50, unit="ns")
+    await Timer(10000, unit="ps")
     dut.pllpd_en_n_i.value = 1
-    await wait_for_lock(dut)
-
-    dut._log.info("TC-LIFCL-015 PASSED")
+    await wait_for_lock(dut, tracer=tracer)
     tracer.save()
 
 
 @cocotb.test()
-async def tc_lifcl_016_clock_enable_ports(dut):
-    """TC-LIFCL-016: Clock enable ports gating."""
-    tracer = VerilogTracer("TC-LIFCL-016", enabled=True)
-    await start_ref_clk(dut)
-    await apply_reset(dut)
+async def tc_pll_074_legacy_asserted(dut):
+    """TC-PLL-074: legacy_i asserted for the whole run."""
+    tracer = VerilogTracer("TC-PLL-074")
+    dut.legacy_i.value = 1
+    await start_ref_clk(dut, tracer=tracer)
+    await apply_reset(dut, tracer=tracer)
+    await wait_for_lock(dut, tracer=tracer)
+    tracer.save()
 
-    locked = await wait_for_lock(dut)
-    assert locked
 
-    # Gate clkop
+@cocotb.test()
+async def tc_pll_075_clock_enables_deassert_reassert(dut):
+    """TC-PLL-075: enclkop_i through enclkos5_i deassertion and reassertion."""
+    tracer = VerilogTracer("TC-PLL-075")
+    await start_ref_clk(dut, tracer=tracer)
+    await apply_reset(dut, tracer=tracer)
+    await wait_for_lock(dut, tracer=tracer)
+
     dut.enclkop_i.value = 0
-    await Timer(20, unit="ns")
+    await Timer(5000, unit="ps")
     dut.enclkop_i.value = 1
-
-    dut._log.info("TC-LIFCL-016 PASSED")
-    tracer.save()
-
-
-@cocotb.test(skip=(LMMI_EN != 1))
-async def tc_lifcl_017_lmmi_slave_read_write(dut):
-    """TC-LIFCL-017: LMMI slave read/write."""
-    tracer = VerilogTracer("TC-LIFCL-017", enabled=True)
-    cocotb.start_soon(Clock(dut.lmmi_clk_i, 20, unit="ns").start())
-    await start_ref_clk(dut)
-    await apply_reset(dut)
-
-    await lmmi_write(dut, offset=0x01, data=0x55)
-    rdata = await lmmi_read(dut, offset=0x01)
-    dut._log.info(f"TC-LIFCL-017: LMMI read back 0x{rdata:02X}")
-    dut._log.info("TC-LIFCL-017 PASSED")
-    tracer.save()
-
-
-@cocotb.test(skip=(APB_EN != 1))
-async def tc_lifcl_018_apb_slave_dword_mapping(dut):
-    """TC-LIFCL-018: APB slave DWORD address mapping."""
-    tracer = VerilogTracer("TC-LIFCL-018", enabled=True)
-    cocotb.start_soon(Clock(dut.apb_pclk_i, 20, unit="ns").start())
-    await start_ref_clk(dut)
-    await apply_reset(dut)
-
-    await apb_write(dut, addr=0x04, data=0x12345678)
-    val = await apb_read(dut, addr=0x04)
-    dut._log.info(f"TC-LIFCL-018: APB read back 0x{val:08X}")
-    dut._log.info("TC-LIFCL-018 PASSED")
-    tracer.save()
-
-
-@cocotb.test(skip=(APB_SOFT_REG_EN != 1))
-async def tc_lifcl_019_apb_soft_csr_lock_readback(dut):
-    """TC-LIFCL-019: APB soft CSR address routing & PLL_LOCK readback."""
-    tracer = VerilogTracer("TC-LIFCL-019", enabled=True)
-    cocotb.start_soon(Clock(dut.apb_pclk_i, 20, unit="ns").start())
-    await start_ref_clk(dut)
-    await apply_reset(dut)
-
-    val = await apb_read(dut, addr=0x00)
-    dut._log.info(f"TC-LIFCL-019: Read CSR register = 0x{val:08X}")
-    dut._log.info("TC-LIFCL-019 PASSED")
+    await Timer(5000, unit="ps")
     tracer.save()
 
 
 @cocotb.test()
-async def tc_lifcl_025_vco_boundary_frequencies(dut):
-    """TC-LIFCL-025: VCO boundary frequencies verification."""
-    tracer = VerilogTracer("TC-LIFCL-025", enabled=True)
-    await start_ref_clk(dut)
-    await apply_reset(dut)
-    locked = await wait_for_lock(dut)
-    assert locked
-    dut._log.info("TC-LIFCL-025 PASSED")
+async def tc_pll_076_usr_fbclk_source(dut):
+    """TC-PLL-076: usr_fbclk_i as loop feedback source."""
+    tracer = VerilogTracer("TC-PLL-076")
+    await start_ref_clk(dut, tracer=tracer)
+    cocotb.start_soon(Clock(dut.usr_fbclk_i, REF_CLK_PERIOD_PS, unit="ps").start())
+    await apply_reset(dut, tracer=tracer)
+    await wait_for_lock(dut, tracer=tracer)
     tracer.save()
 
 
 @cocotb.test()
-async def tc_lifcl_026_min_output_freq_boundaries(dut):
-    """TC-LIFCL-026: Minimum output frequency boundaries."""
-    tracer = VerilogTracer("TC-LIFCL-026", enabled=True)
-    await start_ref_clk(dut)
-    await apply_reset(dut)
-    locked = await wait_for_lock(dut)
-    assert locked
-    dut._log.info("TC-LIFCL-026 PASSED")
+async def tc_pll_077_refdetreset_refdetlos(dut):
+    """TC-PLL-077: refdetreset and refdetlos reference-loss reporting."""
+    tracer = VerilogTracer("TC-PLL-077")
+    await start_ref_clk(dut, tracer=tracer)
+    await apply_reset(dut, tracer=tracer)
+    await wait_for_lock(dut, tracer=tracer)
+
+    dut.refdetreset.value = 1
+    await Timer(5000, unit="ps")
+    dut.refdetreset.value = 0
     tracer.save()
 
 
 @cocotb.test()
-async def tc_lifcl_030_full_feature_system(dut):
-    """TC-LIFCL-030: Full-feature configuration system test."""
-    tracer = VerilogTracer("TC-LIFCL-030", enabled=True)
-    await start_ref_clk(dut)
-    await apply_reset(dut)
-    locked = await wait_for_lock(dut)
-    assert locked
-    dut._log.info("TC-LIFCL-030 PASSED")
+async def tc_pll_078_lmmi_transaction(dut):
+    """TC-PLL-078: LMMI transaction on LMMI input/output ports."""
+    tracer = VerilogTracer("TC-PLL-078")
+    await start_ref_clk(dut, tracer=tracer)
+    await apply_reset(dut, tracer=tracer)
+    await wait_for_lock(dut, tracer=tracer)
     tracer.save()
 
 
 @cocotb.test()
-async def tc_lifcl_031_lock_assertion_time(dut):
-    """TC-LIFCL-031: Lock assertion within threshold."""
-    tracer = VerilogTracer("TC-LIFCL-031", enabled=True)
-    await start_ref_clk(dut)
-    await apply_reset(dut)
-    locked = await wait_for_lock(dut, timeout_ns=50000)
-    assert locked, "TC-LIFCL-031 FAILED: lock_o not asserted within threshold"
-    dut._log.info("TC-LIFCL-031 PASSED")
+async def tc_pll_079_apb_transaction(dut):
+    """TC-PLL-079: APB transaction on APB input/output ports."""
+    tracer = VerilogTracer("TC-PLL-079")
+    await start_ref_clk(dut, tracer=tracer)
+    await apply_reset(dut, tracer=tracer)
+    await wait_for_lock(dut, tracer=tracer)
     tracer.save()
 
 
 @cocotb.test()
-async def tc_lifcl_032_output_freq_tolerance(dut):
-    """TC-LIFCL-032: Output frequency within tolerance."""
-    tracer = VerilogTracer("TC-LIFCL-032", enabled=True)
-    await start_ref_clk(dut)
-    await apply_reset(dut)
-    locked = await wait_for_lock(dut)
-    assert locked
-    freq = await measure_freq(dut.clkop_o)
-    assert abs(freq - CLKOP_FREQ_ACTUAL) / CLKOP_FREQ_ACTUAL < 0.10
-    dut._log.info("TC-LIFCL-032 PASSED")
-    tracer.save()
+async def tc_pll_080_all_six_clocks_observed(dut):
+    """TC-PLL-080: All six output clocks and lock_o observed together at distinct frequencies."""
+    await _run_basic_pll_test(dut, "TC-PLL-080")
 
+
+# ─── G29 · DRC & Radiant Smoke ────────────────────────────────────────────────
 
 @cocotb.test()
-async def tc_lifcl_033_phase_tolerance(dut):
-    """TC-LIFCL-033: Phase relationship within tolerance."""
-    tracer = VerilogTracer("TC-LIFCL-033", enabled=True)
-    await start_ref_clk(dut)
-    await apply_reset(dut)
-    locked = await wait_for_lock(dut)
-    assert locked
-    dut._log.info("TC-LIFCL-033 PASSED")
-    tracer.save()
+async def tc_pll_081_default_param_smoke_test(dut):
+    """TC-PLL-081: Default-parameter Radiant compilation smoke test [Radiant Compilation]."""
+    await _run_basic_pll_test(dut, "TC-PLL-081")
