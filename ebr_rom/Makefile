@@ -95,10 +95,6 @@ DEVICE_FAMILY    ?= lifcl
 FAMILY          ?= LIFCL
 export RDATA_WIDTH RADDR_DEPTH REGMODE RESETMODE OUTPUT_CLK_EN ECC_ENABLE INIT_MODE INIT_FILE INIT_FILE_FORMAT DEVICE_FAMILY FAMILY
 
-# Set KEEP_WORK=1 to preserve results/tc-XX-YY/work after each run (large; off by default).
-KEEP_WORK ?= 0
-export KEEP_WORK
-
 # Optional: run a single test case
 # Example: make TESTCASE=tc_01_01_sequential_read_noreg
 ifdef TESTCASE
