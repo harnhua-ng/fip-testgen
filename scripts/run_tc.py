@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 """
-Run a specific test case or all tests in a group.
+Run a specific test case or all tests in a group according to ROM_TestPlan_LIFCL.md.
 
 Usage:
-    python3 scripts/run_tc.py TC-01-01        # single test case
-    python3 scripts/run_tc.py TG-01           # all test cases in group 01
-    python3 scripts/run_tc.py TG-10           # DRC tests (pytest, no simulator)
+    python3 scripts/run_tc.py info            # print quick test outline
+    python3 scripts/run_tc.py test            # run Sim Only and DRC test suite
+    python3 scripts/run_tc.py TC-ROM-001      # single test case
+    python3 scripts/run_tc.py G1              # group 1 (Baseline)
+    python3 scripts/run_tc.py TG-01           # alias for G1
+    python3 scripts/run_tc.py DRC             # DRC parameter validation suite
 
 Or via make:
-    make tc-01-01
+    make info
+    make test
+    make tc-rom-001
     make tg-01
-    make drc        # equivalent to make tg-10
+    make drc
 """
 
 import os
@@ -23,257 +28,259 @@ from dataclasses import dataclass
 
 REPO_ROOT = os.environ.get("IP_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Ensure local .venv is in PATH if present (prepend so it takes precedence)
-for _vbin in [os.path.join(REPO_ROOT, ".venv", "bin"), os.path.join(REPO_ROOT, ".venv", "Scripts")]:
-    if os.path.isdir(_vbin):
-        os.environ["PATH"] = _vbin + os.pathsep + os.environ.get("PATH", "")
-        break
-
 
 def fixture(name):
-    """Return the absolute path to a testbench fixture file."""
+    """Return absolute path to a testbench fixture file."""
     return os.path.join(REPO_ROOT, "testbench", name)
 
 
 @dataclass
 class TC:
     testcase: str                     # CoCoTB function name in tb_rom.py
-    regmode: str        = "noreg"
-    rdata_width: int    = 36
-    raddr_depth: int    = 512
+    regmode: str        = "reg"
+    rdata_width: int    = 18
+    raddr_depth: int    = 1024
     resetmode: str      = "sync"
     output_clk_en: int  = 0
     ecc_enable: int     = 0
-    init_mode: str      = "all_one"
-    init_file: str      = None        # None → Makefile default (rom_init.hex)
-    init_file_format: str = "hex"
-    family: str         = "LIFCL"
-    note: str           = ""          # non-empty for always-skipped tests
+    init_mode: str      = "mem_file"
+    init_file: str      = None        # None → auto-located by testbench
+    init_file_format: str = "binary"
+    family: str         = "common"
+    test_type: str      = "Both"      # 'Both', 'Sim Only', 'Radiant Compilation'
+    note: str           = ""
 
 
-# ─── TC lookup table ─────────────────────────────────────────────────────────
+# ─── Full TC lookup table (TC-ROM-001 through TC-ROM-034) ────────────────────
 
 TC_MAP = {
-    # ── TG-01  Basic Read ────────────────────────────────────────────────────
-    "01-01": TC("tc_01_01_sequential_read_noreg",
-                regmode="noreg", rdata_width=36, raddr_depth=512,
-                init_mode="mem_file", family="common"),
-    "01-02": TC("tc_01_02_sequential_read_reg",
-                regmode="reg", rdata_width=36, raddr_depth=512),
-    "01-03": TC("tc_01_03_full_sweep_noreg",
-                regmode="noreg", rdata_width=36, raddr_depth=512),
-    "01-04": TC("tc_01_04_full_sweep_reg",
-                regmode="reg", rdata_width=36, raddr_depth=512),
-    "01-05": TC("tc_01_05_boundary_addresses",
-                regmode="reg", rdata_width=18, raddr_depth=1024),
-    "01-06": TC("tc_01_06_random_addresses",
-                regmode="reg", rdata_width=36, raddr_depth=512),
-    "01-07": TC("tc_01_07_repeated_address",
-                regmode="noreg", rdata_width=9, raddr_depth=2048),
+    # ── G1 · Baseline ────────────────────────────────────────────────────────
+    "ROM-001": TC("tc_rom_001_default_config_read",
+                  raddr_depth=1024, rdata_width=18, regmode="reg", resetmode="sync",
+                  init_file_format="binary", init_file=fixture("rom_1024x18.bin"),
+                  test_type="Both"),
 
-    # ── TG-02  Read Enable ───────────────────────────────────────────────────
-    "02-01": TC("tc_02_01_rd_en_zero_at_start",
-                regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1),
-    "02-02": TC("tc_02_02_rd_en_deasserted_mid_seq",
-                regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1),
-    "02-03": TC("tc_02_03_rd_en_toggle_every_cycle",
-                regmode="noreg", rdata_width=18, raddr_depth=1024),
-    "02-04": TC("tc_02_04_rd_en_resumes",
-                regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1),
+    # ── G2 · RADDR_DEPTH ─────────────────────────────────────────────────────
+    "ROM-002": TC("tc_rom_002_minimum_address_depth",
+                  raddr_depth=2, rdata_width=1, regmode="reg", resetmode="sync",
+                  init_file_format="binary", init_file=fixture("rom_2x1.bin"),
+                  test_type="Radiant Compilation"),
+    "ROM-003": TC("tc_rom_003_median_address_depth_full_range",
+                  raddr_depth=1024, rdata_width=18, regmode="reg", resetmode="sync",
+                  init_file_format="binary", init_file=fixture("rom_1024x18.bin"),
+                  test_type="Sim Only"),
+    "ROM-004": TC("tc_rom_004_maximum_address_depth",
+                  raddr_depth=65536, rdata_width=18, regmode="reg", resetmode="sync",
+                  init_file_format="binary", init_file=fixture("rom_65536x18.bin"),
+                  test_type="Radiant Compilation"),
+    "ROM-005": TC("tc_rom_005_address_depth_at_budget",
+                  raddr_depth=3024, rdata_width=512, regmode="reg", resetmode="sync",
+                  init_file_format="hex", init_file=fixture("rom_3024x512.hex"),
+                  test_type="Radiant Compilation"),
+    "ROM-006": TC("tc_rom_006_non_power_of_two_depth",
+                  raddr_depth=1000, rdata_width=8, regmode="reg", resetmode="sync",
+                  init_file_format="hex", init_file=fixture("rom_1000x8.hex"),
+                  test_type="Radiant Compilation"),
 
-    # ── TG-03  Read Clock Enable ─────────────────────────────────────────────
-    "03-01": TC("tc_03_01_clk_en_zero_holds_noreg",
-                regmode="noreg", rdata_width=36, raddr_depth=512),
-    "03-02": TC("tc_03_02_clk_en_zero_holds_reg",
-                regmode="reg", rdata_width=36, raddr_depth=512),
-    "03-03": TC("tc_03_03_clk_en_reassertion",
-                regmode="reg", rdata_width=36, raddr_depth=512),
-    "03-04": TC("tc_03_04_clk_en_toggle_pattern",
-                regmode="noreg", rdata_width=18, raddr_depth=1024),
-    "03-05": TC("tc_03_05_cascaded_clk_en",
-                regmode="reg", rdata_width=36, raddr_depth=1024),
+    # ── G3 · RDATA_WIDTH ─────────────────────────────────────────────────────
+    "ROM-007": TC("tc_rom_007_minimum_data_width",
+                  raddr_depth=1024, rdata_width=1, regmode="reg", resetmode="sync",
+                  init_file_format="binary", init_file=fixture("rom_1024x1.bin"),
+                  test_type="Both"),
+    "ROM-008": TC("tc_rom_008_median_data_width_walk_pattern",
+                  raddr_depth=1024, rdata_width=18, regmode="reg", resetmode="sync",
+                  init_file_format="binary", init_file=fixture("rom_1024x18_walk.bin"),
+                  test_type="Sim Only"),
+    "ROM-009": TC("tc_rom_009_maximum_data_width_tiling",
+                  raddr_depth=2048, rdata_width=512, regmode="reg", resetmode="sync",
+                  init_file_format="hex", init_file=fixture("rom_2048x512.hex"),
+                  test_type="Both"),
+    "ROM-010": TC("tc_rom_010_data_width_36_wide_branch",
+                  raddr_depth=512, rdata_width=36, regmode="reg", resetmode="sync",
+                  init_file_format="binary", init_file=fixture("rom_512x36.bin"),
+                  test_type="Radiant Compilation"),
 
-    # ── TG-04  Output Clock Enable ───────────────────────────────────────────
-    "04-01": TC("tc_04_01_out_clk_en_zero_freezes_output",
-                regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1),
-    "04-02": TC("tc_04_02_out_clk_en_normal_operation",
-                regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1),
-    "04-03": TC("tc_04_03_out_clk_en_toggle_mid_seq",
-                regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=1),
-    "04-04": TC("tc_04_04_output_clk_en_param_zero_no_effect",
-                regmode="reg", rdata_width=36, raddr_depth=512, output_clk_en=0),
-    "04-05": TC("tc_04_05_both_enables_deasserted",
-                regmode="reg", rdata_width=18, raddr_depth=1024, output_clk_en=1),
+    # ── G4 · REGMODE ─────────────────────────────────────────────────────────
+    "ROM-011": TC("tc_rom_011_output_register_enabled_latency",
+                  raddr_depth=1024, rdata_width=18, regmode="reg", resetmode="sync",
+                  init_file_format="binary", init_file=fixture("rom_1024x18.bin"),
+                  test_type="Sim Only"),
+    "ROM-012": TC("tc_rom_012_output_register_disabled_latency",
+                  raddr_depth=1024, rdata_width=18, regmode="noreg", resetmode="sync",
+                  init_file_format="binary", init_file=fixture("rom_1024x18.bin"),
+                  test_type="Both"),
 
-    # ── TG-05  Reset Behavior ────────────────────────────────────────────────
-    "05-01": TC("tc_05_01_sync_reset_clears_output",
-                regmode="reg", rdata_width=36, raddr_depth=512, resetmode="sync"),
-    "05-02": TC("tc_05_02_sync_reset_during_read",
-                regmode="reg", rdata_width=36, raddr_depth=512, resetmode="sync"),
-    "05-03": TC("tc_05_03_sync_reset_release_resumes",
-                regmode="reg", rdata_width=36, raddr_depth=512, resetmode="sync"),
-    "05-04": TC("tc_05_04_async_reset_clears_immediately",
-                regmode="reg", rdata_width=36, raddr_depth=512, resetmode="async"),
-    "05-05": TC("tc_05_05_async_reset_release_resumes",
-                regmode="reg", rdata_width=36, raddr_depth=512, resetmode="async"),
-    "05-06": TC("tc_05_06_noreg_reset_has_no_effect",
-                regmode="noreg", rdata_width=36, raddr_depth=512, resetmode="sync"),
+    # ── G5 · RESETMODE ───────────────────────────────────────────────────────
+    "ROM-013": TC("tc_rom_013_sync_reset_output_register",
+                  raddr_depth=1024, rdata_width=18, regmode="reg", resetmode="sync",
+                  output_clk_en=1, init_file_format="binary", init_file=fixture("rom_1024x18.bin"),
+                  test_type="Both"),
+    "ROM-014": TC("tc_rom_014_async_reset_assertion",
+                  raddr_depth=1024, rdata_width=18, regmode="reg", resetmode="async",
+                  init_file_format="binary", init_file=fixture("rom_1024x18.bin"),
+                  test_type="Radiant Compilation"),
 
-    # ── TG-06  Memory Initialization ─────────────────────────────────────────
-    "06-01": TC("tc_06_01_all_zero_init",
-                regmode="noreg", rdata_width=36, raddr_depth=512, init_mode="all_zero"),
-    "06-02": TC("tc_06_02_all_one_init",
-                regmode="noreg", rdata_width=36, raddr_depth=512, init_mode="all_one"),
-    "06-03": TC("tc_06_03_mem_file_hex",
-                regmode="noreg", rdata_width=36, raddr_depth=512,
-                init_mode="mem_file", init_file_format="hex"),
-    "06-04": TC("tc_06_04_mem_file_binary",
-                regmode="noreg", rdata_width=18, raddr_depth=1024,
-                init_mode="mem_file",
-                init_file=fixture("rom_init_18_1024.bin"),
-                init_file_format="binary"),
-    "06-05": TC("tc_06_05_mem_file_alternating_pattern",
-                regmode="noreg", rdata_width=9, raddr_depth=2048,
-                init_mode="mem_file",
-                init_file=fixture("rom_init_9_2048_alt.hex")),
-    "06-06": TC("tc_06_06_mem_file_addr_as_data",
-                regmode="noreg", rdata_width=36, raddr_depth=512,
-                init_mode="mem_file", init_file_format="hex"),
-    "06-07": TC("tc_06_07_all_zero_narrow",
-                regmode="noreg", rdata_width=1, raddr_depth=16384, init_mode="all_zero"),
-    "06-08": TC("tc_06_08_mem_file_binary_narrow",
-                regmode="noreg", rdata_width=4, raddr_depth=4096,
-                init_mode="mem_file",
-                init_file=fixture("rom_init_4_4096.bin"),
-                init_file_format="binary"),
+    # ── G6 · INIT_FILE_FORMAT ────────────────────────────────────────────────
+    "ROM-015": TC("tc_rom_015_binary_format_initialization",
+                  raddr_depth=1024, rdata_width=18, regmode="reg", resetmode="sync",
+                  init_file_format="binary", init_file=fixture("rom_1024x18.bin"),
+                  test_type="Both"),
+    "ROM-016": TC("tc_rom_016_hex_format_initialization",
+                  raddr_depth=1024, rdata_width=18, regmode="reg", resetmode="sync",
+                  init_file_format="hex", init_file=fixture("rom_1024x18.hex"),
+                  test_type="Both"),
 
-    # ── TG-07  LIFCL EBR Tile Configuration Coverage ─────────────────────────
-    "07-01": TC("tc_07_01_minimum_config",
-                regmode="noreg", rdata_width=1, raddr_depth=2, init_mode="all_zero"),
-    "07-02": TC("tc_07_02_1bit_max_depth",
-                regmode="noreg", rdata_width=1, raddr_depth=16384,
-                init_mode="mem_file",
-                init_file=fixture("rom_init_1_16384.hex")),
-    "07-03": TC("tc_07_03_2bit_8192",
-                regmode="noreg", rdata_width=2, raddr_depth=8192,
-                init_mode="mem_file",
-                init_file=fixture("rom_init_2_8192.hex")),
-    "07-04": TC("tc_07_04_4bit_4096",
-                regmode="noreg", rdata_width=4, raddr_depth=4096,
-                init_mode="mem_file",
-                init_file=fixture("rom_init_4_4096.hex")),
-    "07-05": TC("tc_07_05_9bit_2048_parity",
-                regmode="noreg", rdata_width=9, raddr_depth=2048,
-                init_mode="mem_file",
-                init_file=fixture("rom_init_9_2048_alt.hex")),
-    "07-06": TC("tc_07_06_18bit_1024_parity",
-                regmode="noreg", rdata_width=18, raddr_depth=1024,
-                init_mode="mem_file",
-                init_file=fixture("rom_init_18_1024.hex")),
-    "07-07": TC("tc_07_07_36bit_512_default",
-                regmode="noreg", rdata_width=36, raddr_depth=512,
-                init_mode="mem_file"),
-    "07-08": TC("tc_07_08_non_aligned_width",
-                regmode="noreg", rdata_width=12, raddr_depth=512,
-                init_mode="mem_file",
-                init_file=fixture("rom_init_12_512.hex")),
+    # ── G7 · OUTPUT_CLK_EN ───────────────────────────────────────────────────
+    "ROM-017": TC("tc_rom_017_output_clk_en_not_requested",
+                  raddr_depth=1024, rdata_width=18, regmode="reg", resetmode="sync",
+                  output_clk_en=0, init_file_format="binary", init_file=fixture("rom_1024x18.bin"),
+                  test_type="Radiant Compilation"),
+    "ROM-018": TC("tc_rom_018_output_clk_en_requested",
+                  raddr_depth=1024, rdata_width=18, regmode="reg", resetmode="sync",
+                  output_clk_en=1, init_file_format="binary", init_file=fixture("rom_1024x18.bin"),
+                  test_type="Both"),
 
-    # ── TG-08  EBR Cascading ─────────────────────────────────────────────────
-    "08-01": TC("tc_08_01_addr_cascade_x2",
-                regmode="noreg", rdata_width=36, raddr_depth=1024,
-                init_mode="mem_file",
-                init_file=fixture("rom_init_36_1024.hex")),
-    "08-02": TC("tc_08_02_addr_cascade_x4",
-                regmode="noreg", rdata_width=36, raddr_depth=2048,
-                init_mode="mem_file",
-                init_file=fixture("rom_init_36_2048.hex")),
-    "08-03": TC("tc_08_03_data_cascade_x2",
-                regmode="noreg", rdata_width=72, raddr_depth=512,
-                init_mode="mem_file",
-                init_file=fixture("rom_init_72_512.hex")),
-    "08-04": TC("tc_08_04_data_cascade_x4",
-                regmode="noreg", rdata_width=144, raddr_depth=512,
-                init_mode="mem_file",
-                init_file=fixture("rom_init_144_512.hex")),
-    "08-05": TC("tc_08_05_both_cascades",
-                regmode="noreg", rdata_width=72, raddr_depth=1024,
-                init_mode="mem_file",
-                init_file=fixture("rom_init_72_1024.hex")),
-    "08-06": TC("tc_08_06_bank_boundary_read",
-                regmode="noreg", rdata_width=36, raddr_depth=1024,
-                init_mode="mem_file",
-                init_file=fixture("rom_init_36_1024.hex")),
-    "08-07": TC("tc_08_07_addr_cascade_clk_en_toggle",
-                regmode="noreg", rdata_width=36, raddr_depth=1024,
-                init_mode="mem_file",
-                init_file=fixture("rom_init_36_1024.hex")),
-    "08-08": TC("tc_08_08_addr_cascade_reg_mode",
-                regmode="reg", rdata_width=36, raddr_depth=2048,
-                init_mode="mem_file",
-                init_file=fixture("rom_init_36_2048.hex")),
+    # ── G8 · user_init_file ──────────────────────────────────────────────────
+    "ROM-019": TC("tc_rom_019_comments_at_address_surplus",
+                  raddr_depth=1024, rdata_width=18, regmode="reg", resetmode="sync",
+                  init_file_format="hex", init_file=fixture("rom_sparse.hex"),
+                  test_type="Both"),
 
-    # ── TG-09  ECC ───────────────────────────────────────────────────────────
-    "09-01": TC("tc_09_01_ecc_disabled_outputs_zero",
-                regmode="noreg", rdata_width=36, raddr_depth=512, ecc_enable=0),
-    "09-02": TC("tc_09_02_ecc_enabled_clean_data",
-                regmode="noreg", rdata_width=32, raddr_depth=512, ecc_enable=1),
-    "09-03": TC("tc_09_03_ecc_minimum_width",
-                regmode="noreg", rdata_width=32, raddr_depth=512, ecc_enable=1),
-    "09-04": TC("tc_09_04_ecc_maximum_width",
-                regmode="noreg", rdata_width=64, raddr_depth=512, ecc_enable=1),
-    "09-05": TC("tc_09_05_sec_single_bit_error",
-                regmode="noreg", rdata_width=32, raddr_depth=512, ecc_enable=1,
-                note="Always skipped — set ECC_ERROR_INJECT=1 and supply a pre-corrupted fixture"),
-    "09-06": TC("tc_09_06_ded_double_bit_error",
-                regmode="noreg", rdata_width=32, raddr_depth=512, ecc_enable=1,
-                note="Always skipped — set ECC_ERROR_INJECT=1 and supply a pre-corrupted fixture"),
-    "09-07": TC("tc_09_07_ecc_error_recovery",
-                regmode="noreg", rdata_width=32, raddr_depth=512, ecc_enable=1,
-                note="Always skipped — set ECC_ERROR_INJECT=1 and supply a pre-corrupted fixture"),
+    # ── G9 · Cross-Parameter Legal Combinations ──────────────────────────────
+    "ROM-020": TC("tc_rom_020_max_depth_separate_enable_hex",
+                  raddr_depth=65536, rdata_width=18, regmode="reg", resetmode="sync",
+                  output_clk_en=1, init_file_format="hex", init_file=fixture("rom_65536x18.hex"),
+                  test_type="Sim Only"),
+    "ROM-021": TC("tc_rom_021_max_width_noreg_hex",
+                  raddr_depth=2048, rdata_width=512, regmode="noreg", resetmode="sync",
+                  init_file_format="hex", init_file=fixture("rom_2048x512.hex"),
+                  test_type="Both"),
+    "ROM-022": TC("tc_rom_022_at_budget_separate_enable_async_reset",
+                  raddr_depth=3024, rdata_width=512, regmode="reg", resetmode="async",
+                  output_clk_en=1, init_file_format="binary", init_file=fixture("rom_3024x512.bin"),
+                  test_type="Radiant Compilation"),
+    "ROM-023": TC("tc_rom_023_min_dimensions_noreg",
+                  raddr_depth=2, rdata_width=1, regmode="noreg", resetmode="sync",
+                  init_file_format="hex", init_file=fixture("rom_2x1.hex"),
+                  test_type="Both"),
+
+    # ── G10 · Port Behaviour ─────────────────────────────────────────────────
+    "ROM-024": TC("tc_rom_024_rd_clk_en_freezes_memory_array",
+                  raddr_depth=1024, rdata_width=18, regmode="reg", resetmode="sync",
+                  output_clk_en=0, init_file_format="binary", init_file=fixture("rom_1024x18.bin"),
+                  test_type="Sim Only"),
+    "ROM-025": TC("tc_rom_025_rd_out_clk_en_freezes_output_register",
+                  raddr_depth=1024, rdata_width=18, regmode="reg", resetmode="sync",
+                  output_clk_en=1, init_file_format="binary", init_file=fixture("rom_1024x18.bin"),
+                  test_type="Sim Only"),
+    "ROM-026": TC("tc_rom_026_rd_en_as_second_series_enable",
+                  raddr_depth=1024, rdata_width=18, regmode="reg", resetmode="sync",
+                  output_clk_en=1, init_file_format="binary", init_file=fixture("rom_1024x18.bin"),
+                  test_type="Sim Only"),
+    "ROM-027": TC("tc_rom_027_rd_en_ignored_without_separate_enable",
+                  raddr_depth=1024, rdata_width=18, regmode="reg", resetmode="sync",
+                  output_clk_en=0, init_file_format="binary", init_file=fixture("rom_1024x18.bin"),
+                  test_type="Sim Only"),
+    "ROM-028": TC("tc_rom_028_rst_inert_with_output_register_bypassed",
+                  raddr_depth=1024, rdata_width=18, regmode="noreg", resetmode="sync",
+                  output_clk_en=0, init_file_format="binary", init_file=fixture("rom_1024x18.bin"),
+                  test_type="Sim Only"),
+    "ROM-029": TC("tc_rom_029_rd_addr_above_configured_depth",
+                  raddr_depth=1000, rdata_width=8, regmode="reg", resetmode="sync",
+                  output_clk_en=0, init_file_format="hex", init_file=fixture("rom_1000x8.hex"),
+                  test_type="Sim Only"),
+    "ROM-030": TC("tc_rom_030_ecc_outputs_inert_and_dangling",
+                  raddr_depth=1024, rdata_width=36, regmode="reg", resetmode="sync",
+                  output_clk_en=0, init_file_format="binary", init_file=fixture("rom_1024x36.bin"),
+                  test_type="Both"),
+
+    # ── G11 · DRC & Radiant Smoke ────────────────────────────────────────────
+    "ROM-031": TC("tc_rom_031_memory_init_readonly_fill_unreachable",
+                  test_type="Radiant Compilation"),
+    "ROM-032": TC("tc_rom_032_init_data_update_control_hidden",
+                  test_type="Radiant Compilation"),
+    "ROM-033": TC("tc_rom_033_derived_readonly_settings",
+                  raddr_depth=1000, rdata_width=8, init_file_format="hex",
+                  test_type="Radiant Compilation"),
+    "ROM-034": TC("tc_rom_034_default_param_smoke_test",
+                  test_type="Radiant Compilation"),
 }
 
-# Ordered TC IDs per group
+# Group mapping (G1..G11)
 TG_MAP = {
-    "01": ["01-01", "01-02", "01-03", "01-04", "01-05", "01-06", "01-07"],
-    "02": ["02-01", "02-02", "02-03", "02-04"],
-    "03": ["03-01", "03-02", "03-03", "03-04", "03-05"],
-    "04": ["04-01", "04-02", "04-03", "04-04", "04-05"],
-    "05": ["05-01", "05-02", "05-03", "05-04", "05-05", "05-06"],
-    "06": ["06-01", "06-02", "06-03", "06-04", "06-05", "06-06", "06-07", "06-08"],
-    "07": ["07-01", "07-02", "07-03", "07-04", "07-05", "07-06", "07-07", "07-08"],
-    "08": ["08-01", "08-02", "08-03", "08-04", "08-05", "08-06", "08-07", "08-08"],
-    "09": ["09-01", "09-02", "09-03", "09-04", "09-05", "09-06", "09-07"],
-    "10": [],   # DRC — handled via pytest, not make sim
+    "01": ["ROM-001"],
+    "02": ["ROM-002", "ROM-003", "ROM-004", "ROM-005", "ROM-006"],
+    "03": ["ROM-007", "ROM-008", "ROM-009", "ROM-010"],
+    "04": ["ROM-011", "ROM-012"],
+    "05": ["ROM-013", "ROM-014"],
+    "06": ["ROM-015", "ROM-016"],
+    "07": ["ROM-017", "ROM-018"],
+    "08": ["ROM-019"],
+    "09": ["ROM-020", "ROM-021", "ROM-022", "ROM-023"],
+    "10": ["ROM-024", "ROM-025", "ROM-026", "ROM-027", "ROM-028", "ROM-029", "ROM-030"],
+    "11": ["ROM-031", "ROM-032", "ROM-033", "ROM-034"],
 }
 
 
-# ─── simulator invocation ────────────────────────────────────────────────────
+def _artifact_paths(tc_id):
+    """Return relative paths for artifacts."""
+    safe_id = tc_id.lower().replace("_", "-")
+    log_rel   = f"results/tc-{safe_id}.log"
+    wlf_rel   = f"results/tc-{safe_id}.wlf"
+    trace_rel = f"results/tc-{safe_id}_trace.v"
+    return log_rel, wlf_rel, trace_rel
+
+
+def _parse_log(log_path):
+    """Parse a test log and return (status, sim_ns, real_s)."""
+    if not os.path.isfile(log_path):
+        return None
+    status = "FAIL"
+    sim_ns = None
+    real_s = None
+    with open(log_path, errors="ignore") as f:
+        for line in f:
+            if "TESTS=" in line:
+                if "FAIL=0" in line and ("PASS=1" in line or "PASS=" in line):
+                    status = "PASS"
+                elif "FAIL=" in line and not "FAIL=0" in line:
+                    status = "FAIL"
+                parts = line.split()
+                if len(parts) >= 6:
+                    try:
+                        sim_ns = float(parts[-2])
+                        real_s = float(parts[-1])
+                    except ValueError:
+                        pass
+            if "REAL_TIME_S=" in line:
+                try:
+                    real_s = float(line.split("=")[1])
+                except ValueError:
+                    pass
+    return status, sim_ns, real_s
+
 
 def run_sim(tc_id, tc):
-    """Invoke make sim with the parameters for one TC. Returns the exit code."""
+    """Invoke make sim for one TC. Returns exit code."""
     results_dir = os.path.join(REPO_ROOT, "results")
-    sim_build   = os.path.join(REPO_ROOT, "sim_build", "tc-" + tc_id)
-    log_file    = os.path.join(results_dir, "tc-" + tc_id + ".log")
+    sim_build   = os.path.join(REPO_ROOT, "sim_build", "tc-" + tc_id.lower())
+    log_file    = os.path.join(results_dir, f"tc-{tc_id.lower()}.log")
 
-    log_rel, wlf_rel, _, _ = _artifact_paths(tc_id)
-    tc_plusarg = tc_id.replace("-", "_")
-    flow = os.getenv("FLOW", "cocotb")
+    log_rel, wlf_rel, _ = _artifact_paths(tc_id)
     cmd = [
         "make", "-C", REPO_ROOT, "sim",
-        "FLOW="            + flow,
-        "FAMILY="          + tc.family,
-        "REGMODE="         + tc.regmode,
-        "RDATA_WIDTH="     + str(tc.rdata_width),
-        "RADDR_DEPTH="     + str(tc.raddr_depth),
-        "RESETMODE="       + tc.resetmode,
-        "OUTPUT_CLK_EN="   + str(tc.output_clk_en),
-        "ECC_ENABLE="      + str(tc.ecc_enable),
-        "INIT_MODE="       + tc.init_mode,
+        "FAMILY="           + tc.family,
+        "REGMODE="          + tc.regmode,
+        "RDATA_WIDTH="      + str(tc.rdata_width),
+        "RADDR_DEPTH="      + str(tc.raddr_depth),
+        "RESETMODE="        + tc.resetmode,
+        "OUTPUT_CLK_EN="    + str(tc.output_clk_en),
+        "ECC_ENABLE="       + str(tc.ecc_enable),
+        "INIT_MODE="        + tc.init_mode,
         "INIT_FILE_FORMAT=" + tc.init_file_format,
-        "TESTCASE="        + tc.testcase,
-        "TC="              + tc_plusarg,
-        "SIM_BUILD="       + sim_build,
-        "WLF_FILE="        + os.path.join(REPO_ROOT, wlf_rel),
+        "TESTCASE="         + tc.testcase,
+        "SIM_BUILD="        + sim_build,
+        "WLF_FILE="         + os.path.join(REPO_ROOT, wlf_rel),
     ]
     if tc.init_file is not None:
         cmd.append("INIT_FILE=" + tc.init_file)
@@ -281,13 +288,12 @@ def run_sim(tc_id, tc):
     os.makedirs(results_dir, exist_ok=True)
     print("")
     print("=" * 66)
-    print(f"  TC-{tc_id}  {tc.testcase} (FLOW={flow})")
+    print(f"  TC-{tc_id}  {tc.testcase} [{tc.test_type}]")
     print("=" * 66)
 
     t0 = time.time()
     with open(log_file, "w") as log:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         for line in proc.stdout:
             sys.stdout.write(line)
             log.write(line)
@@ -296,16 +302,6 @@ def run_sim(tc_id, tc):
 
     with open(log_file, "a") as log:
         log.write(f"REAL_TIME_S={real_s:.3f}\n")
-
-    # Copy compiled work library to results/ only when KEEP_WORK=1.
-    # Default is to discard it — the library can be several hundred MB per TC.
-    if os.environ.get("KEEP_WORK", "0") == "1":
-        work_src = os.path.join(sim_build, "work")
-        work_dst = os.path.join(results_dir, "tc-" + tc_id, "work")
-        if os.path.isdir(work_src):
-            if os.path.exists(work_dst):
-                shutil.rmtree(work_dst)
-            shutil.copytree(work_src, work_dst)
 
     rc = proc.returncode
     if rc == 0:
@@ -316,266 +312,202 @@ def run_sim(tc_id, tc):
 
 
 def run_drc():
-    """Run TG-10 DRC tests via pytest."""
-    cmd = ["make", "-C", REPO_ROOT, "drc"]
-    print("")
+    """Run G11 DRC tests via pytest, capturing output to results/drc.log."""
+    print("\n" + "=" * 66)
+    print("  G11: DRC & Parameter Validation (pytest)")
     print("=" * 66)
-    print("  TG-10  DRC and Parameter Validation  (pytest)")
-    print("=" * 66)
-    return subprocess.run(cmd).returncode
-
-
-# ─── log parsing and group summary ──────────────────────────────────────────
-
-# Matches CoCoTB result rows: ** <testname>  PASS|FAIL|SKIP  sim_ns  real_s  ratio **
-_RESULT_RE = re.compile(
-    r'\*\*\s+(\S+)\s+(PASS|FAIL|SKIP)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*\*\*'
-)
-_PASS_RE = re.compile(r'SIMULATION PASSED')
-_FAIL_RE = re.compile(r'SIMULATION FAILED')
-_SIM_TIME_RE = re.compile(r'#\s+Time:\s+([\d.]+)\s+ns', re.IGNORECASE)
-_REAL_TIME_RE = re.compile(r'REAL_TIME_S=([\d.]+)')
-
-
-def _parse_log(log_file):
-    """Return (status, sim_ns, real_s, ratio) from CoCoTB or Verilog testbench log, or None."""
-    status = None
-    sim_ns = None
-    real_s = None
-    try:
-        with open(log_file) as f:
-            for line in f:
-                # Check cocotb table first
-                m = _RESULT_RE.search(line)
-                if m and m.group(1) != "TEST":
-                    return m.group(2), float(m.group(3)), float(m.group(4)), float(m.group(5))
-                # Check Verilog displays
-                if _PASS_RE.search(line):
-                    status = "PASS"
-                elif _FAIL_RE.search(line):
-                    status = "FAIL"
-                m_sim = _SIM_TIME_RE.search(line)
-                if m_sim:
-                    sim_ns = float(m_sim.group(1))
-                m_real = _REAL_TIME_RE.search(line)
-                if m_real:
-                    real_s = float(m_real.group(1))
-    except OSError:
-        pass
-    if status is not None:
-        return status, sim_ns, real_s, None
-    return None
-
-
-def _artifact_paths(tc_id):
-    """Return (log_relpath, wlf_relpath, work_relpath, trace_relpath) relative to REPO_ROOT."""
-    stem = "tc-" + tc_id
-    trace_path = os.path.join("results", stem + "_trace.v")
-    trace_display = trace_path if os.path.isfile(os.path.join(REPO_ROOT, trace_path)) else "--"
-    work_path = os.path.join("results", stem, "work")
-    work_display = work_path if os.path.isdir(os.path.join(REPO_ROOT, work_path)) else "--"
-    return (
-        os.path.join("results", stem + ".log"),
-        os.path.join("results", stem + ".wlf"),
-        work_display,
-        trace_display,
-    )
-
-
-def _print_group_summary(tg_id, tc_ids, failures):
     results_dir = os.path.join(REPO_ROOT, "results")
-
-    rows = []
-    for tc_id in tc_ids:
-        tc     = TC_MAP[tc_id]
-        log    = os.path.join(results_dir, "tc-" + tc_id + ".log")
-        parsed = _parse_log(log)
-        if parsed:
-            status, sim_ns, real_s, _ = parsed
-        else:
-            status = "FAIL" if tc_id in failures else "SKIP"
-            sim_ns = real_s = None
-        log_rel, wlf_rel, work_rel, trace_rel = _artifact_paths(tc_id)
-        rows.append((tc_id, status, sim_ns, real_s, log_rel, wlf_rel, work_rel, trace_rel))
-
-    # ── Artifacts table ───────────────────────────────────────────────────
-    log_w  = max(len(r[4]) for r in rows)
-    wlf_w  = max(len(r[5]) for r in rows)
-    work_w = max(max(len(r[6]) for r in rows), len("WORK DIR"))
-    trc_w  = max(max(len(r[7]) for r in rows), len("VERILOG TRACE"))
-    art_W  = 10 + 2 + log_w + 2 + wlf_w + 2 + work_w + 2 + trc_w + 2
-    print("")
-    print("=" * art_W)
-    print(f"  TG-{tg_id} — Artifacts")
-    print("=" * art_W)
-    print(f"  {'TC':<10}  {'LOG':<{log_w}}  {'WAVEFORM':<{wlf_w}}  {'WORK DIR':<{work_w}}  {'VERILOG TRACE':<{trc_w}}")
-    print("  " + "-" * (art_W - 2))
-    for tc_id, status, sim_ns, real_s, log_rel, wlf_rel, work_rel, trace_rel in rows:
-        print(f"  {'TC-' + tc_id:<10}  {log_rel:<{log_w}}  {wlf_rel:<{wlf_w}}  {work_rel:<{work_w}}  {trace_rel:<{trc_w}}")
-
-    # ── Results table ─────────────────────────────────────────────────────
-    res_W = 58
-    print("")
-    print("=" * res_W)
-    print(f"  TG-{tg_id} — Results")
-    print("=" * res_W)
-    print(f"  {'TC':<10}  {'STATUS':>6}  {'SIM TIME (ns)':>13}  {'REAL TIME (s)':>13}")
-    print("  " + "-" * (res_W - 2))
-
-    pass_c = fail_c = skip_c = 0
-    total_ns = total_real = 0.0
-    for tc_id, status, sim_ns, real_s, log_rel, wlf_rel, work_rel, trace_rel in rows:
-        if   status == "PASS": pass_c += 1
-        elif status == "FAIL": fail_c += 1
-        else:                  skip_c += 1
-        if sim_ns is not None:
-            total_ns   += sim_ns
-            total_real += real_s
-        ns_s    = f"{sim_ns:>13.2f}" if sim_ns is not None else f"{'--':>13}"
-        real_s2 = f"{real_s:>13.2f}" if real_s is not None else f"{'--':>13}"
-        print(f"  {'TC-' + tc_id:<10}  {status:>6}  {ns_s}  {real_s2}")
-
-    n = len(rows)
-    print("  " + "-" * (res_W - 2))
-    print(f"  TESTS={n}  PASS={pass_c}  FAIL={fail_c}  SKIP={skip_c}  {total_ns:>13.2f}  {total_real:>13.2f}")
-    print("=" * res_W)
-    if failures:
-        print(f"  TG-{tg_id}: {len(failures)} FAILED — {', '.join('TC-' + f for f in failures)}")
-    else:
-        print(f"  TG-{tg_id}: all {n} passed")
-    print("=" * res_W)
+    os.makedirs(results_dir, exist_ok=True)
+    log_file = os.path.join(results_dir, "drc.log")
+    drc_path = os.path.join(REPO_ROOT, "src", "test_drc.py")
+    cmd = ["pytest", drc_path, "-v"]
+    with open(log_file, "w") as log:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            log.write(line)
+        proc.wait()
+    return proc.returncode
 
 
-# ─── failure labelling ───────────────────────────────────────────────────────
-
-_LABELS = {"1": "Confirmed", "2": "Assumed", "3": "Flagged",
-           "c": "Confirmed", "a": "Assumed",  "f": "Flagged"}
-
-
-def _prompt_failure_label(tc_id):
-    """Interactively prompt for a failure label and an optional note.
-
-    Returns (label, note).  Falls back to "Assumed" / "" when stdin is not a
-    terminal (e.g. CI pipelines).
-    """
-    if not sys.stdin.isatty():
-        return "Assumed", ""
-    print(f"\n  TC-{tc_id} FAILED — assign a label:")
-    print("    [1] Confirmed  External evidence backs up what we see")
-    print("    [2] Assumed    Nothing contradicts it; taken as truth for now")
-    print("    [3] Flagged    Unusual or suspicious; needs more investigation")
-    while True:
+def print_outline():
+    """Print a quick outline of the IP's test situation."""
+    # Discover IP name from metadata.xml or fallback
+    raw_ip_name = "rom"
+    ip_display = "ROM"
+    ip_version = "2.5.0"
+    meta_path = os.path.join(REPO_ROOT, "metadata.xml")
+    if os.path.isfile(meta_path):
         try:
-            choice = input("  Choice (1/2/3): ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return "Assumed", ""
-        label = _LABELS.get(choice)
-        if label:
-            break
-        print("  Invalid choice — enter 1, 2, or 3.")
-    try:
-        note = input("  Note (optional, press Enter to skip): ").strip()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        note = ""
-    return label, note
+            with open(meta_path, "r", errors="ignore") as f:
+                content = f.read()
+                m_name = re.search(r'<lsccip:name>(.*?)</lsccip:name>', content)
+                m_disp = re.search(r'<lsccip:display_name>(.*?)</lsccip:display_name>', content)
+                m_ver  = re.search(r'<lsccip:version>(.*?)</lsccip:version>', content)
+                if m_name: raw_ip_name = m_name.group(1)
+                if m_disp: ip_display = m_disp.group(1)
+                if m_ver:  ip_version = m_ver.group(1)
+        except Exception:
+            pass
+
+    ip_name = f"lscc_{raw_ip_name}" if not raw_ip_name.startswith("lscc_") else raw_ip_name
+
+    # Count test cases by category strictly per Test Plan
+    total_tcs = len(TC_MAP)
+    both_cnt = sum(1 for tc in TC_MAP.values() if tc.test_type == "Both")
+    sim_cnt  = sum(1 for tc in TC_MAP.values() if tc.test_type == "Sim Only")
+    rad_cnt  = sum(1 for tc in TC_MAP.values() if tc.test_type == "Radiant Compilation")
+
+    # Count DRC tests in test_drc.py
+    drc_path = os.path.join(REPO_ROOT, "src", "test_drc.py")
+    drc_test_count = 0
+    if os.path.isfile(drc_path):
+        with open(drc_path, "r", errors="ignore") as f:
+            drc_test_count = sum(1 for line in f if line.strip().startswith("def test_"))
+
+    # Count synthesizable wrappers / projects
+    synth_dir = os.path.join(REPO_ROOT, "synth")
+    synth_wrappers = []
+    if os.path.isdir(synth_dir):
+        synth_wrappers = [f for f in os.listdir(synth_dir) if f.endswith(".v") or f.endswith(".sv")]
+    num_projects = len(synth_wrappers) if synth_wrappers else 1
+
+    print("=" * 66)
+    print(f"  IP Test Overview: {ip_name} (LIFCL v{ip_version})")
+    print("=" * 66)
+    print(f"  IP name:                        {ip_name} ({ip_display})")
+    print(f"  Testgroups:                     {len(TG_MAP)} (G01–G10 Functional, G11 DRC)")
+    print(f"  Testcases:                      {total_tcs} total (per Test Plan)")
+    print(f"    ├── Both (Sim & Radiant):     {both_cnt}")
+    print(f"    ├── Sim Only:                 {sim_cnt}")
+    print(f"    └── Radiant Compilation:      {rad_cnt}")
+    if drc_test_count > 0:
+        print(f"  DRC Parameter Unit Tests:       {drc_test_count} (in src/test_drc.py for G11 & GUI rules)")
+    print(f"  Synthesizable Radiant projects: {num_projects} ({ip_name}.rdf via `make prj_create`)")
+    print("=" * 66)
 
 
-def _append_failure_summary(run_ts, target, entries):
-    """Append a labeled failure block to results/failure_log.md.
+def run_all_tests():
+    """Run all simulation testgroups G01..G10, G11 DRC, and Radiant project compilation."""
+    print("\n" + "=" * 66)
+    print("  Running Full Test Suite (Simulation + DRC + Radiant Compilation)")
+    print("=" * 66)
+    failures = []
 
-    run_ts  — ISO-style datetime string for this run
-    target  — "TC-XX-YY" or "TG-XX"
-    entries — list of (tc_id, label, note)
-    """
-    summary_path = os.path.join(REPO_ROOT, "results", "failure_log.md")
-    os.makedirs(os.path.dirname(summary_path), exist_ok=True)
-    write_header = not os.path.isfile(summary_path)
-    with open(summary_path, "a") as fh:
-        if write_header:
-            fh.write("# Failure Log\n")
-        fh.write(f"\n## {run_ts}  [{target}]\n")
-        fh.write("| TC | Label | Note |\n")
-        fh.write("|---|---|---|\n")
-        for tc_id, label, note in entries:
-            fh.write(f"| TC-{tc_id} | {label} | {note} |\n")
-    print(f"\n  Failure summary appended → results/failure_log.md")
+    # 1. Run all functional simulation testcases in TG_MAP (G01 .. G10)
+    for grp_num in range(1, 11):
+        grp_key = f"{grp_num:02d}"
+        if grp_key in TG_MAP:
+            tc_ids = TG_MAP[grp_key]
+            for tid in tc_ids:
+                tc = TC_MAP[tid]
+                rc = run_sim(tid, tc)
+                if rc != 0:
+                    failures.append(tid)
+
+    # 2. Run G11 DRC
+    drc_rc = run_drc()
+    if drc_rc != 0:
+        failures.append("G11-DRC")
+
+    # 3. Run Radiant project creation and compilation
+    print("\n" + "=" * 66)
+    print("  Running Radiant Project Creation & Compilation")
+    print("=" * 66)
+    cmd_prj = ["make", "-C", REPO_ROOT, "prj_create", "prj_compile"]
+    proc = subprocess.run(cmd_prj)
+    if proc.returncode != 0:
+        failures.append("Radiant-Compilation")
+
+    total_functional = sum(len(TG_MAP[f"{g:02d}"]) for g in range(1, 11) if f"{g:02d}" in TG_MAP)
+    total_stages = total_functional + 2  # DRC + Radiant Compilation
+    passed_stages = total_stages - len(failures)
+
+    print("\n" + "=" * 66)
+    print(f"  Overall Summary: {passed_stages}/{total_stages} test suites/stages passed")
+    if failures:
+        print(f"  Failed targets: {failures}")
+    print("=" * 66 + "\n")
+    return 1 if failures else 0
 
 
-# ─── parsing ─────────────────────────────────────────────────────────────────
+def _normalize_tc_arg(arg: str):
+    """Normalize user argument to TC ID, Group ID, or special command."""
+    u = arg.upper().replace("_", "-")
+    if u in ("INFO", "--INFO", "-I", "-H", "--HELP", "HELP"):
+        return "INFO", "cmd"
 
-def _strip_prefix(s, prefix):
-    """Python 3.8-compatible str.removeprefix."""
-    return s[len(prefix):] if s.startswith(prefix) else s
+    if u in ("TEST", "ALL", "SIM-ONLY", "SIM_ONLY", "REGRESSION"):
+        return "TEST", "cmd"
 
+    # Group pattern (e.g. TG-01, G1, G01, TG-1)
+    mg = re.match(r'^(?:TG-|G)(\d+)$', u)
+    if mg:
+        grp_num = int(mg.group(1))
+        return f"G{grp_num:02d}", "group"
 
-def parse_arg(arg):
-    """Return ("tc", "XX-YY") or ("tg", "XX") from any reasonable spelling."""
-    upper = arg.upper()
-    if upper.startswith("TC-"):
-        return "tc", _strip_prefix(upper, "TC-")
-    if upper.startswith("TG-"):
-        return "tg", _strip_prefix(upper, "TG-").zfill(2)
-    # bare forms: "01-01" → tc, "01" → tg
-    if "-" in upper:
-        return "tc", upper
-    if upper.isdigit():
-        return "tg", upper.zfill(2)
-    return None, None
+    if u in ("DRC", "TG-11", "G11"):
+        return "G11", "group"
 
+    # TC pattern (e.g. TC-ROM-001, ROM-001, TC-01, 001)
+    m = re.match(r'^(?:TC-)?(?:ROM-)?(\d+)$', u)
+    if m:
+        tc_num = int(m.group(1))
+        return f"ROM-{tc_num:03d}", "tc"
 
-# ─── entry point ─────────────────────────────────────────────────────────────
+    return u, "unknown"
+
 
 def main():
-    if len(sys.argv) != 2:
-        sys.exit("Usage: run_tc.py TC-XX-YY | TG-XX")
+    if len(sys.argv) < 2:
+        print_outline()
+        sys.exit(0)
 
-    kind, ident = parse_arg(sys.argv[1])
-    if kind is None:
-        sys.exit("Unrecognised argument: " + repr(sys.argv[1]) +
-                 "\nExpected TC-XX-YY or TG-XX")
+    target, kind = _normalize_tc_arg(sys.argv[1])
 
-    run_ts = time.strftime("%Y-%m-%d %H:%M")
+    if target == "INFO" or (kind == "cmd" and target == "INFO"):
+        print_outline()
+        sys.exit(0)
 
-    if kind == "tc":
-        if ident not in TC_MAP:
-            sys.exit("Unknown test case: TC-" + ident +
-                     "\nAvailable: " + ", ".join("TC-" + k for k in sorted(TC_MAP)))
-        tc = TC_MAP[ident]
-        if tc.note:
-            print("NOTE  TC-" + ident + ": " + tc.note)
-        rc = run_sim(ident, tc)
-        if rc != 0:
-            label, note = _prompt_failure_label(ident)
-            _append_failure_summary(run_ts, "TC-" + ident, [(ident, label, note)])
+    if target == "TEST" or (kind == "cmd" and target == "TEST"):
+        rc = run_all_tests()
         sys.exit(rc)
 
-    else:  # tg
-        if ident not in TG_MAP:
-            sys.exit("Unknown test group: TG-" + ident +
-                     "\nAvailable: TG-01 … TG-10")
-        if ident == "10":
-            sys.exit(run_drc())
+    if target == "G11" or (kind == "group" and target == "G11"):
+        rc = run_drc()
+        sys.exit(rc)
 
-        tc_ids   = TG_MAP[ident]
-        failures = []
-        for tc_id in tc_ids:
-            tc = TC_MAP[tc_id]
-            if tc.note:
-                print("NOTE  TC-" + tc_id + ": " + tc.note)
-            rc = run_sim(tc_id, tc)
-            if rc != 0:
-                failures.append(tc_id)
-
-        _print_group_summary(ident, tc_ids, set(failures))
-        if failures:
-            entries = []
-            for tc_id in failures:
-                label, note = _prompt_failure_label(tc_id)
-                entries.append((tc_id, label, note))
-            _append_failure_summary(run_ts, "TG-" + ident, entries)
+    if kind == "tc":
+        if target not in TC_MAP:
+            print(f"Error: Unknown testcase {target}. Available: {sorted(TC_MAP.keys())}")
             sys.exit(1)
+        tc = TC_MAP[target]
+        rc = run_sim(target, tc)
+        sys.exit(rc)
+
+    if kind == "group":
+        grp_key = target[1:]  # "01", "02", etc.
+        if grp_key not in TG_MAP:
+            print(f"Error: Unknown group {target}. Available: G01 .. G11")
+            sys.exit(1)
+
+        tc_ids = TG_MAP[grp_key]
+        failures = []
+        for tid in tc_ids:
+            tc = TC_MAP[tid]
+            rc = run_sim(tid, tc)
+            if rc != 0:
+                failures.append(tid)
+
+        print("\n" + "=" * 66)
+        print(f"  Summary for {target}: {len(tc_ids) - len(failures)}/{len(tc_ids)} PASSED")
+        if failures:
+            print(f"  Failed testcases: {failures}")
+        print("=" * 66 + "\n")
+        sys.exit(1 if failures else 0)
+
+    print(f"Error: Unrecognized test argument {sys.argv[1]}")
+    sys.exit(1)
 
 
 if __name__ == "__main__":
