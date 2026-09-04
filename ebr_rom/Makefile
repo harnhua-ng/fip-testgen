@@ -279,9 +279,6 @@ drc:
 .PHONY: test
 test: | results_dir
 	@IP_ROOT=$(CURDIR) python3 $(CURDIR)/../scripts/run_tc.py test
-	@IP_ROOT=$(CURDIR) python3 $(CURDIR)/../scripts/summarize.py $(RESULTS_DIR)/summary.md
-	@echo ""
-	@echo "Summary written to $(RESULTS_DIR)/summary.md"
 
 # ── Overview / Info ───────────────────────────────────────────────────────────
 .PHONY: info
