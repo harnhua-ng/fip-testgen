@@ -6,11 +6,13 @@ Usage:
     python3 scripts/summarize.py                  # prints to stdout
     python3 scripts/summarize.py results/summary.md  # writes to file
 """
+import os
 import re
 import sys
 from pathlib import Path
 
-RESULTS_DIR = Path(__file__).parent.parent / "results"
+_ip_root = os.environ.get("IP_ROOT")
+RESULTS_DIR = Path(_ip_root) / "results" if _ip_root else Path(__file__).parent.parent / "results"
 
 # CoCoTB result table patterns
 RE_TEST = re.compile(
@@ -20,7 +22,29 @@ RE_TOTALS = re.compile(
     r'\*\*\s+TESTS=(\d+)\s+PASS=(\d+)\s+FAIL=(\d+)\s+SKIP=(\d+)'
 )
 
-STATUS_MARK = {"PASS": "✓", "FAIL": "✗", "SKIP": "—"}
+# pytest verbose output patterns (G11 DRC)
+RE_DRC_TEST   = re.compile(r'.*::(\w+)\s+(PASSED|FAILED|SKIPPED)')
+RE_DRC_TOTALS = re.compile(r'(\d+) passed(?:, (\d+) failed)?(?:, (\d+) skipped)?')
+
+STATUS_MARK     = {"PASS": "✓", "FAIL": "✗", "SKIP": "—"}
+DRC_STATUS_MARK = {"PASSED": "✓", "FAILED": "✗", "SKIPPED": "—"}
+
+
+def parse_drc_log(path: Path):
+    tests = []
+    totals = {}
+    for line in path.read_text(errors="replace").splitlines():
+        m = RE_DRC_TEST.match(line)
+        if m:
+            tests.append((m.group(1), m.group(2)))
+            continue
+        m = RE_DRC_TOTALS.search(line)
+        if m:
+            p = int(m.group(1))
+            f = int(m.group(2) or 0)
+            s = int(m.group(3) or 0)
+            totals = {"total": p + f + s, "pass": p, "fail": f, "skip": s}
+    return tests, totals
 
 
 def parse_log(path: Path):
@@ -43,8 +67,10 @@ def parse_log(path: Path):
 
 
 def render(output):
-    log_files = sorted(RESULTS_DIR.glob("*.log"))
-    if not log_files:
+    log_files = sorted(f for f in RESULTS_DIR.glob("*.log") if f.name != "drc.log")
+    drc_log = RESULTS_DIR / "drc.log"
+
+    if not log_files and not drc_log.exists():
         output.write(f"No log files found in {RESULTS_DIR}\n")
         return
 
@@ -68,9 +94,26 @@ def render(output):
         if totals:
             p, f, s, t = totals["pass"], totals["fail"], totals["skip"], totals["total"]
             lines.append(
-                f"\n**PASS: {p} &nbsp; FAIL: {f} &nbsp; SKIP: {s} &nbsp; TOTAL: {t}**\n"
+                f"\n**PASS: {p}  FAIL: {f}  SKIP: {s}  TOTAL: {t}**\n"
             )
             overall.append((config, p, f, s, t))
+
+    if drc_log.exists():
+        drc_tests, drc_totals = parse_drc_log(drc_log)
+        if drc_tests or drc_totals:
+            lines.append("\n## G11 — DRC\n")
+            lines.append("| Test | Status |")
+            lines.append("|------|--------|")
+            for name, status in drc_tests:
+                mark = DRC_STATUS_MARK.get(status, status)
+                lines.append(f"| `{name}` | {mark} {status} |")
+            if drc_totals:
+                p = drc_totals["pass"]
+                f = drc_totals["fail"]
+                s = drc_totals["skip"]
+                t = drc_totals["total"]
+                lines.append(f"\n**PASS: {p}  FAIL: {f}  SKIP: {s}  TOTAL: {t}**\n")
+                overall.append(("drc", p, f, s, t))
 
     if len(overall) > 1:
         lines.append("\n---\n\n## Overall\n")
