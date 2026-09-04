@@ -27,19 +27,25 @@ fip-testgen/
 Each IP directory follows the same layout:
 
 ```
-<ip>/
-├── Makefile              # CoCoTB simulation targets
-├── docs/                 # Test plan (.md) — source of truth, not modified
-├── metadata.xml          # IP parameter definitions — not modified
-├── plugin/               # Radiant IP DRC plugin — not modified
-├── rtl/                  # IP RTL source — not modified
+<IP name>/
+├── docs/
+    └── <ip>_TestPlan_<device family>       # Test plan (.md) - source of truth
+├── plugin/                                 # Radiant IP DRC plugin - not modified
+    └── plugin.py                           # From FIP repository - not modified
+├── proj/                                   # (Generated output) Radiant project (.rdf + impl_1/), not checked in
+├── results/                                # (Generated output) Simulation outputs, not checked in
+├── rtl/                                    # IP RTL source - not modified
+    └── <ip>.v                              # From FIP repository - not modified
+├── sim_build/                              # (Generated outputs) CoCoTB/QuestaSim build artifacts - not checked in
 ├── src/
-│   ├── tb_<ip>.py        # CoCoTB test functions (generated from test plan)
-│   └── test_drc.py       # DRC parameter validation (pytest, no simulator)
-├── testbench/            # Verilog top-level testbench wrapper
-├── proj/                 # Radiant project (.rdf + impl/) — created by make prj_create (git-ignored)
-├── results/              # Simulation outputs (git-ignored)
-└── sim_build/            # CoCoTB/QuestaSim build artifacts (git-ignored)
+    ├── tb_<ip>.py                          # Python CoCoTB test functions - generated from test plan
+    └── test_drc.py                         # DRC parameter validation - uses Python pytest, not behavioral simulator
+├── synth/                                  # Radiant project source files
+    └── <ip>_synth_wrap.v                   # Synthesizable top-level module
+├── testbench/                              # Verilog testbench code
+    └── testgen_top.v                       # Simulation top-level module
+├── Makefile              # CoCoTB simulation and Radiant project targets
+└── metadata.xml          # IP parameter definitions - not modified
 ```
 
 ---
