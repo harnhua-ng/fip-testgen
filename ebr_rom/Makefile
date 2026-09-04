@@ -11,6 +11,7 @@ SHELL := /bin/bash
 #   3. Command-line flags (make LM_LICENSE_FILE=...)
 #
 # Usage:
+#   make info                     # quick test plan outline / overview
 #   make                          # default: noreg / 36b×512 / sync / all_one
 #   make REGMODE=reg RADDR_DEPTH=512   # override individual parameters
 #   make TESTCASE=tc_01_01_sequential_read_noreg  # single test case
@@ -272,18 +273,20 @@ drc:
 	@echo "================================================================"
 	@IP_ROOT=$(CURDIR) python3 $(CURDIR)/../scripts/run_tc.py DRC
 
-# ── test — run all groups G1..G11 and write a summary ────────────────────────
-# Continues through failures so every group is attempted regardless.
+# ── test — run full test suite (Sim + DRC + Radiant Compilation) ──────────────
 # Writes results/summary.md at the end.
 #   make test
 .PHONY: test
 test: | results_dir
-	@for g in 1 2 3 4 5 6 7 8 9 10 11; do \
-	    IP_ROOT=$(CURDIR) python3 $(CURDIR)/../scripts/run_tc.py G$$g || true; \
-	done
+	@IP_ROOT=$(CURDIR) python3 $(CURDIR)/../scripts/run_tc.py test
 	@IP_ROOT=$(CURDIR) python3 $(CURDIR)/../scripts/summarize.py $(RESULTS_DIR)/summary.md
 	@echo ""
 	@echo "Summary written to $(RESULTS_DIR)/summary.md"
+
+# ── Overview / Info ───────────────────────────────────────────────────────────
+.PHONY: info
+info:
+	@IP_ROOT=$(CURDIR) python3 $(CURDIR)/../scripts/run_tc.py info
 
 # ── TC / TG named targets ─────────────────────────────────────────────────────
 # Run one test case:        make tc-rom-001  or  make tc-001
