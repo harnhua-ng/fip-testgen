@@ -157,45 +157,11 @@ endif
 # vlog compile flags
 COMPILE_ARGS += -sv
 
-# Flow selection: cocotb (Python) or rtl (pure Verilog tb_rom.v)
-FLOW ?= cocotb
-
-# Tools for direct RTL simulation
-VLOG := vlog
-VSIM := vsim
-TESTBENCH := $(CURDIR)/testbench/tb_rom.v
-
-# Optional: test case selection for RTL (+TC=) or cocotb (TESTCASE=)
-TC ?=
-ifdef TC
-SIM_ARGS += +TC=$(TC)
-endif
-
 # Ensure results/ exists before vsim writes the WLF
 .PHONY: results_dir
 results_dir:
 	@mkdir -p $(RESULTS_DIR)
 
-ifeq ($(FLOW),rtl)
-# ── Direct Verilog simulation flow ────────────────────────────────────────────
-.PHONY: sim
-sim: results_dir
-	@mkdir -p $(SIM_BUILD)
-	vlib $(SIM_BUILD)/work
-	$(VLOG) -work $(SIM_BUILD)/work $(COMPILE_ARGS) $(VERILOG_SOURCES) $(TESTBENCH)
-	$(VSIM) -work $(SIM_BUILD)/work -c -L $(DEVICE_FAMILY) -L pmi_work \
-		-GFAMILY=$(FAMILY) \
-		-GRDATA_WIDTH=$(RDATA_WIDTH) -GRADDR_DEPTH=$(RADDR_DEPTH) \
-		-GREGMODE=$(REGMODE) -GRESETMODE=$(RESETMODE) \
-		-GOUTPUT_CLK_EN=$(OUTPUT_CLK_EN) -GECC_ENABLE=$(ECC_ENABLE) \
-		-GINIT_MODE=$(INIT_MODE) -GINIT_FILE=$(INIT_FILE) \
-		-GINIT_FILE_FORMAT=$(INIT_FILE_FORMAT) \
-		-voptargs="+acc" -suppress 12130 \
-		-wlf $(WLF_FILE) \
-		$(if $(TC),+TC=$(TC),) \
-		-do "log -r /*; run -all; quit" \
-		tb_rom
-else
 # ── CoCoTB simulation flow ────────────────────────────────────────────────────
 # Pull in cocotb's Questa Makefile rules (provides sim, compile, clean)
 COCOTB_MAKEFILES_DIR := $(shell $(COCOTB_CONFIG) --makefiles 2>/dev/null)
@@ -204,7 +170,6 @@ COCOTB_MAKEFILE := $(COCOTB_MAKEFILES_DIR)/Makefile.sim
 ifneq ($(wildcard $(COCOTB_MAKEFILE)),)
 include $(COCOTB_MAKEFILE)
 sim: results_dir
-endif
 endif
 endif
 
