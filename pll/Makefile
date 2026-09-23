@@ -58,6 +58,16 @@ else
     export LD_LIBRARY_PATH := $(RADIANT_ROOT)/bin/lin64/gnu:$(RADIANT_ROOT)/bin/lin64:$(RADIANT_ROOT)/ispfpga/bin/lin64$(if $(LD_LIBRARY_PATH),:$(LD_LIBRARY_PATH))
 endif
 
+# ModelSim / QuestaSim binary directory for cocotb
+ifeq ($(DETECTED_OS),Windows)
+    MODELSIM_BIN_DIR ?= $(wildcard $(RADIANT_ROOT)/questasim/win64)
+else
+    MODELSIM_BIN_DIR ?= $(firstword $(wildcard $(RADIANT_ROOT)/tptools/questasim/linux/questasim/bin $(RADIANT_ROOT)/questasim/linux_x86_64))
+endif
+ifneq ($(MODELSIM_BIN_DIR),)
+    export MODELSIM_BIN_DIR
+endif
+
 export FOUNDRY
 export LM_LICENSE_FILE
 export SALT_LICENSE_SERVER
