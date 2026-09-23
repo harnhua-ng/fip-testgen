@@ -135,8 +135,8 @@ async def read_burst(dut, num_words: int, tracer: VerilogTracer = None) -> list[
         return received
 
     # Standard FIFO mode (FWFT == 0)
-    # In noreg mode, data is available immediately on the 1st read clock edge (start_cycle=0).
-    # In reg mode, output register adds 1 cycle latency (start_cycle=1).
+    # In noreg mode, data is available after 1st read clock edge (start_cycle=0 in 0-indexed loop).
+    # In reg mode, output register adds 1 cycle latency (start_cycle=1 in 0-indexed loop).
     start_cycle = 0 if (REGMODE == "noreg") else 1
     total_cycles = num_words + start_cycle + 1
     
